@@ -1,0 +1,15 @@
+[package]
+name = "redscript-vm"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "4836356" }
+gc-arena = "0.2"
+intmap = "0.7"
+casey = "0.3"
+enum-as-inner = "0.3"
+log = "0.4"

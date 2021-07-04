@@ -1,0 +1,9 @@
+cargo-features = ["strip"]
+
+[workspace]
+members = [
+  "vm"
+]
+
+[profile.release]
+strip = "symbols"
