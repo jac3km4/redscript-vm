@@ -91,6 +91,20 @@ impl<'pool> Metadata<'pool> {
         meta.native = Some(function);
         Some(())
     }
+
+    pub fn is_instance_of(&self, instance: PoolIndex<Class>, of: PoolIndex<Class>) -> bool {
+        let mut expected = of;
+        loop {
+            let class = self.pool.class(expected).unwrap();
+            if instance == expected {
+                break true;
+            } else if class.base.is_undefined() {
+                break false;
+            } else {
+                expected = class.base;
+            }
+        }
+    }
 }
 
 struct Symbols {

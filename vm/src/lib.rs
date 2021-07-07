@@ -377,13 +377,24 @@ impl<'pool> VM<'pool> {
             }
             Instr::I32ToEnum(_, _) => {
                 self.exec(frame);
-                let pool = self.metadata.pool();
-                self.unop(|val, _| {
-                    let v: i32 = FromVM::from_vm(val, pool).unwrap();
-                    Value::EnumVal(v.into())
-                })
+                self.unop(|val, _| Value::EnumVal(val.unpinned().into_i32().unwrap().into()))
             }
-            Instr::DynamicCast(_, _) => todo!(),
+            Instr::DynamicCast(expected, _) => {
+                self.exec(frame);
+
+                let meta = &self.metadata;
+                self.arena.mutate(|mc, root| {
+                    let mut stack = root.stack.write(mc);
+                    let obj = stack.pop().unwrap().unpinned().into_obj().unwrap();
+                    let tag = obj.as_instance().unwrap().read().tag.to_pool();
+                    let res = if meta.is_instance_of(tag, expected) {
+                        obj
+                    } else {
+                        Obj::Null
+                    };
+                    stack.push(Value::Obj(res))
+                });
+            }
             Instr::ToString(_) => {
                 self.exec(frame);
                 self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string())));
