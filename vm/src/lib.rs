@@ -229,14 +229,23 @@ impl<'pool> VM<'pool> {
             }
             Instr::JumpIfFalse(offset) => {
                 self.exec(frame);
-                let pool = self.metadata.pool();
-                let cond: bool = self.pop(|v, _| FromVM::from_vm(v, pool).unwrap());
+                let cond: bool = self.pop(|val, _| val.unpinned().into_bool().unwrap());
                 if !cond {
                     frame.seek(offset.absolute(location.unwrap()));
                 }
             }
             Instr::Skip(_) => todo!(),
-            Instr::Conditional(_, _) => todo!(),
+            Instr::Conditional(when_false, exit) => {
+                self.exec(frame);
+                let cond: bool = self.pop(|val, _| val.unpinned().into_bool().unwrap());
+                if cond {
+                    self.exec(frame);
+                } else {
+                    frame.seek(when_false.absolute(location.unwrap()));
+                    self.exec(frame);
+                }
+                frame.seek(exit.absolute(location.unwrap()));
+            }
             Instr::Construct(_, _) => todo!(),
             Instr::InvokeStatic(_, _, idx) => {
                 self.call_static(idx, frame);
