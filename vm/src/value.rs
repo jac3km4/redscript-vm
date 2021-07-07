@@ -72,6 +72,25 @@ impl<'gc> Value<'gc> {
             Value::Pinned(v) => v.read().to_string(),
         }
     }
+
+    pub fn equals(self, other: Value) -> bool {
+        match (self.unpinned(), other.unpinned()) {
+            (Value::I8(lhs), Value::I8(rhs)) => lhs == rhs,
+            (Value::I16(lhs), Value::I16(rhs)) => lhs == rhs,
+            (Value::I32(lhs), Value::I32(rhs)) => lhs == rhs,
+            (Value::I64(lhs), Value::I64(rhs)) => lhs == rhs,
+            (Value::U8(lhs), Value::U8(rhs)) => lhs == rhs,
+            (Value::U16(lhs), Value::U16(rhs)) => lhs == rhs,
+            (Value::U32(lhs), Value::U32(rhs)) => lhs == rhs,
+            (Value::U64(lhs), Value::U64(rhs)) => lhs == rhs,
+            (Value::F32(lhs), Value::F32(rhs)) => lhs == rhs,
+            (Value::F64(lhs), Value::F64(rhs)) => lhs == rhs,
+            (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
+            (Value::EnumVal(lhs), Value::EnumVal(rhs)) => lhs == rhs,
+            (Value::Str(lhs), Value::Str(rhs)) => lhs.as_str() == rhs.as_str(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Collect)]

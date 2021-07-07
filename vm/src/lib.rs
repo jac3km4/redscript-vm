@@ -54,17 +54,35 @@ impl<'pool> VM<'pool> {
     #[inline]
     fn pop<F, A>(&mut self, f: F) -> A
     where
-        for<'gc, 'ctx> F: FnOnce(MutationContext<'gc, 'ctx>, Value<'gc>) -> A,
+        for<'gc, 'ctx> F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> A,
     {
-        self.arena.mutate(|mc, root| f(mc, root.pop(mc).unwrap()))
+        self.arena.mutate(|mc, root| f(root.pop(mc).unwrap(), mc))
     }
 
     #[inline]
-    fn swap<F>(&mut self, f: F)
+    fn copy(&mut self, idx: usize) {
+        self.arena.mutate(|mc, root| root.copy(idx, mc))
+    }
+
+    #[inline]
+    fn unop<F>(&mut self, f: F)
     where
-        for<'gc, 'ctx> F: FnOnce(MutationContext<'gc, 'ctx>, Value<'gc>) -> Value<'gc>,
+        for<'gc, 'ctx> F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
     {
-        self.arena.mutate(|mc, root| root.swap(|val| f(mc, val), mc))
+        self.arena.mutate(|mc, root| root.unop(f, mc))
+    }
+
+    #[inline]
+    fn binop<F>(&mut self, f: F)
+    where
+        for<'gc, 'ctx> F: FnOnce(Value<'gc>, Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+    {
+        self.arena.mutate(|mc, root| root.binop(f, mc))
+    }
+
+    #[inline]
+    fn adjust_stack(&mut self, size: usize) {
+        self.arena.mutate(|mc, root| root.adjust_stack(size, mc))
     }
 
     fn run(&mut self, frame: &mut Frame) -> bool {
@@ -147,7 +165,7 @@ impl<'pool> VM<'pool> {
             }
             Instr::Breakpoint(_, _, _, _, _, _) => todo!(),
             Instr::Assign => {
-                self.assign(frame);
+                self.assignment(frame);
             }
             Instr::Target(_) => todo!(),
             Instr::Local(idx) => {
@@ -179,22 +197,40 @@ impl<'pool> VM<'pool> {
             }
             Instr::StructField(idx) => {
                 self.exec(frame);
-                self.swap(|_, v| match v {
+                self.unop(|v, _| match v {
                     Value::BoxedStruct(cell) => cell.read().get(idx).unwrap().clone(),
                     _ => todo!(),
                 });
             }
             Instr::ExternalVar => todo!(),
-            Instr::Switch(_, _) => todo!(),
-            Instr::SwitchLabel(_, _) => todo!(),
-            Instr::SwitchDefault => todo!(),
+            Instr::Switch(_, _) => {
+                let idx = frame.sp;
+                self.exec(frame);
+                let mut pos = frame.location().unwrap();
+                while let Some(Instr::SwitchLabel(next, body)) = frame.next_instr() {
+                    self.copy(idx);
+                    self.exec(frame);
+                    self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
+
+                    let equal = self.pop(|val, _| val.into_bool().unwrap());
+                    if equal {
+                        frame.seek(body.absolute(pos));
+                        break;
+                    }
+                    pos = next.absolute(pos);
+                    frame.seek(pos);
+                }
+                self.adjust_stack(idx);
+            }
+            Instr::SwitchLabel(_, _) => {}
+            Instr::SwitchDefault => {}
             Instr::Jump(offset) => {
                 frame.seek(offset.absolute(location.unwrap()));
             }
             Instr::JumpIfFalse(offset) => {
                 self.exec(frame);
                 let pool = self.metadata.pool();
-                let cond: bool = self.pop(|_, v| FromVM::from_vm(v, pool).unwrap());
+                let cond: bool = self.pop(|v, _| FromVM::from_vm(v, pool).unwrap());
                 if !cond {
                     frame.seek(offset.absolute(location.unwrap()));
                 }
@@ -209,8 +245,8 @@ impl<'pool> VM<'pool> {
                 let tag = self
                     .arena
                     .mutate(|_, root| root.contexts.read().last().unwrap().as_instance().unwrap().read().tag);
-                let idx = self.metadata.get_vtable(tag.to_pool()).unwrap();
-                let idx = PoolIndex::new(idx.get(name).unwrap().0);
+                let vtable = self.metadata.get_vtable(tag.to_pool()).unwrap();
+                let idx = vtable.get(name).unwrap().to_pool();
                 self.call_static(idx, frame);
             }
             Instr::ParamEnd => {}
@@ -233,29 +269,39 @@ impl<'pool> VM<'pool> {
                     root.contexts.write(mc).pop();
                 });
             }
-            Instr::Equals(_) => todo!(),
-            Instr::NotEquals(_) => todo!(),
+            Instr::Equals(_) => {
+                self.exec(frame);
+                self.exec(frame);
+                self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
+            }
+            Instr::NotEquals(_) => {
+                self.exec(frame);
+                self.exec(frame);
+                self.binop(|lhs, rhs, _| Value::Bool(!lhs.equals(rhs)));
+            }
             Instr::New(class) => {
                 let meta = &mut self.metadata;
-                self.arena.mutate(move |mc, root| {
+                self.arena.mutate(|mc, root| {
                     let instance = Instance::new(class, meta, mc);
                     root.push(Value::Obj(Obj::Instance(GcCell::allocate(mc, instance))), mc);
                 });
                 self.check_gc();
             }
             Instr::Delete => todo!(),
-            Instr::This => self.arena.mutate(|mc, root| {
-                let obj = root.contexts.read();
-                root.push(Value::Obj(obj.last().unwrap().clone()), mc)
-            }),
+            Instr::This => {
+                self.arena.mutate(|mc, root| {
+                    let obj = root.contexts.read();
+                    root.push(Value::Obj(obj.last().unwrap().clone()), mc)
+                });
+            }
             Instr::StartProfiling(_, _) => todo!(),
             Instr::ArrayClear(_) => {
                 self.exec(frame);
-                self.pop(|mc, val| val.as_array().unwrap().write(mc).clear());
+                self.pop(|val, mc| val.as_array().unwrap().write(mc).clear());
             }
             Instr::ArraySize(_) => {
                 self.exec(frame);
-                self.swap(|_, val| Value::I32(val.as_array().unwrap().read().len() as i32));
+                self.unop(|val, _| Value::I32(val.as_array().unwrap().read().len() as i32));
             }
             Instr::ArrayResize(_) => todo!(),
             Instr::ArrayFindFirst(_) => todo!(),
@@ -286,12 +332,9 @@ impl<'pool> VM<'pool> {
             Instr::ArrayElement(_) => {
                 self.exec(frame);
                 self.exec(frame);
-                let pool = self.metadata.pool();
-                self.arena.mutate(|mc, root| {
-                    let index: i32 = FromVM::from_vm(root.pop(mc).unwrap(), pool).unwrap();
-                    let array = root.pop(mc).unwrap();
-                    let elem = array.as_array().unwrap().read().get(index as usize).unwrap().clone();
-                    root.push(elem, mc);
+                self.binop(|array, index, _| {
+                    let index = index.unpinned().into_i32().unwrap();
+                    array.as_array().unwrap().read().get(index as usize).unwrap().clone()
                 });
             }
             Instr::StaticArraySize(_) => todo!(),
@@ -307,26 +350,26 @@ impl<'pool> VM<'pool> {
             Instr::StaticArrayElement(_) => todo!(),
             Instr::RefToBool => {
                 self.exec(frame);
-                self.swap(|_, val| match val {
+                self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
                 })
             }
             Instr::WeakRefToBool => {
                 self.exec(frame);
-                self.swap(|_, val| match val {
+                self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
                 })
             }
             Instr::EnumToI32(_, _) => {
                 self.exec(frame);
-                self.swap(|_, val| Value::I32(val.into_enum_val().unwrap() as i32))
+                self.unop(|val, _| Value::I32(val.into_enum_val().unwrap() as i32))
             }
             Instr::I32ToEnum(_, _) => {
                 self.exec(frame);
                 let pool = self.metadata.pool();
-                self.swap(|_, val| {
+                self.unop(|val, _| {
                     let v: i32 = FromVM::from_vm(val, pool).unwrap();
                     Value::EnumVal(v.into())
                 })
@@ -334,7 +377,7 @@ impl<'pool> VM<'pool> {
             Instr::DynamicCast(_, _) => todo!(),
             Instr::ToString(_) => {
                 self.exec(frame);
-                self.swap(|mc, val| Value::Str(Gc::allocate(mc, val.to_string())));
+                self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string())));
             }
             Instr::ToVariant(_) => todo!(),
             Instr::FromVariant(_) => todo!(),
@@ -440,7 +483,7 @@ impl<'pool> VM<'pool> {
         }
     }
 
-    fn assign(&mut self, frame: &mut Frame) {
+    fn assignment(&mut self, frame: &mut Frame) {
         match frame.next_instr().unwrap() {
             Instr::Local(idx) => {
                 self.exec(frame);
@@ -565,10 +608,37 @@ impl<'gc> VMRoot<'gc> {
     }
 
     #[inline]
-    fn swap<'ctx, F: FnOnce(Value<'gc>) -> Value<'gc>>(&self, fun: F, mc: MutationContext<'gc, 'ctx>) {
+    fn copy<'ctx>(&self, idx: usize, mc: MutationContext<'gc, 'ctx>) {
+        let mut stack = self.stack.write(mc);
+        let val = stack[idx].clone();
+        stack.push(val);
+    }
+
+    #[inline]
+    fn unop<'ctx, F>(&self, fun: F, mc: MutationContext<'gc, 'ctx>)
+    where
+        F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+    {
         let mut stack = self.stack.write(mc);
         let val = stack.pop().unwrap();
-        stack.push(fun(val))
+        stack.push(fun(val, mc))
+    }
+
+    #[inline]
+    fn binop<'ctx, F>(&self, fun: F, mc: MutationContext<'gc, 'ctx>)
+    where
+        F: FnOnce(Value<'gc>, Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+    {
+        let mut stack = self.stack.write(mc);
+        let rhs = stack.pop().unwrap();
+        let lhs = stack.pop().unwrap();
+        stack.push(fun(lhs, rhs, mc))
+    }
+
+    #[inline]
+    fn adjust_stack<'ctx>(&self, size: usize, mc: MutationContext<'gc, 'ctx>) {
+        let mut stack = self.stack.write(mc);
+        stack.resize(size, Value::Obj(Obj::Null));
     }
 }
 
