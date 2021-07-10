@@ -210,11 +210,11 @@ impl<'pool> VM<'pool> {
             }
             Instr::ExternalVar => todo!(),
             Instr::Switch(_, _) => {
-                let idx = frame.sp;
+                let sp = self.arena.mutate(|_, root| root.stack.read().len());
                 self.exec(frame);
                 let mut pos = frame.location().unwrap();
                 while let Some(Instr::SwitchLabel(next, body)) = frame.next_instr() {
-                    self.copy(idx);
+                    self.copy(sp);
                     self.exec(frame);
                     self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
 
@@ -226,7 +226,7 @@ impl<'pool> VM<'pool> {
                     pos = next.absolute(pos);
                     frame.seek(pos);
                 }
-                self.adjust_stack(idx);
+                self.adjust_stack(sp);
             }
             Instr::SwitchLabel(_, _) => {}
             Instr::SwitchDefault => {}
