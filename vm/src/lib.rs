@@ -10,10 +10,10 @@ use redscript::bytecode::{Instr, Location, Offset};
 use redscript::definition::{Function, Parameter};
 use value::Value;
 
-use crate::interop::FromVM;
 use crate::value::{Instance, Obj};
 
-pub mod index_map;
+mod array;
+mod index_map;
 pub mod interop;
 pub mod metadata;
 pub mod native;
@@ -212,7 +212,7 @@ impl<'pool> VM<'pool> {
                     self.exec(frame);
                     self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
 
-                    let equal = self.pop(|val, _| val.into_bool().unwrap());
+                    let equal = self.pop(|val, _| val.unpinned().into_bool().unwrap());
                     if equal {
                         frame.seek(body.absolute(pos));
                         break;
@@ -238,12 +238,10 @@ impl<'pool> VM<'pool> {
             Instr::Conditional(when_false, exit) => {
                 self.exec(frame);
                 let cond: bool = self.pop(|val, _| val.unpinned().into_bool().unwrap());
-                if cond {
-                    self.exec(frame);
-                } else {
+                if !cond {
                     frame.seek(when_false.absolute(location.unwrap()));
-                    self.exec(frame);
                 }
+                self.exec(frame);
                 frame.seek(exit.absolute(location.unwrap()));
             }
             Instr::Construct(_, _) => todo!(),
@@ -270,7 +268,7 @@ impl<'pool> VM<'pool> {
             Instr::Context(_) => {
                 self.exec(frame);
                 self.arena.mutate(|mc, root| {
-                    let obj = root.pop(mc).unwrap().into_obj().unwrap();
+                    let obj = root.pop(mc).unwrap().unpinned().into_obj().unwrap();
                     root.contexts.write(mc).push(obj)
                 });
                 self.exec(frame);
@@ -305,46 +303,67 @@ impl<'pool> VM<'pool> {
             }
             Instr::StartProfiling(_, _) => todo!(),
             Instr::ArrayClear(_) => {
-                self.exec(frame);
-                self.pop(|val, mc| val.as_array().unwrap().write(mc).clear());
+                array::clear(self, frame);
             }
             Instr::ArraySize(_) => {
-                self.exec(frame);
-                self.unop(|val, _| Value::I32(val.as_array().unwrap().read().len() as i32));
+                array::size(self, frame);
             }
-            Instr::ArrayResize(_) => todo!(),
-            Instr::ArrayFindFirst(_) => todo!(),
-            Instr::ArrayFindFirstFast(_) => todo!(),
-            Instr::ArrayFindLast(_) => todo!(),
-            Instr::ArrayFindLastFast(_) => todo!(),
-            Instr::ArrayContains(_) => todo!(),
-            Instr::ArrayContainsFast(_) => todo!(),
-            Instr::ArrayCount(_) => todo!(),
-            Instr::ArrayCountFast(_) => todo!(),
+            Instr::ArrayResize(_) => {
+                array::resize(self, frame);
+            }
+            Instr::ArrayFindFirst(_) => {
+                array::find_first(self, frame);
+            }
+            Instr::ArrayFindFirstFast(_) => {
+                array::find_first(self, frame);
+            }
+            Instr::ArrayFindLast(_) => {
+                array::find_last(self, frame);
+            }
+            Instr::ArrayFindLastFast(_) => {
+                array::find_last(self, frame);
+            }
+            Instr::ArrayContains(_) => {
+                array::contains(self, frame);
+            }
+            Instr::ArrayContainsFast(_) => {
+                array::contains(self, frame);
+            }
+            Instr::ArrayCount(_) => {
+                array::count(self, frame);
+            }
+            Instr::ArrayCountFast(_) => {
+                array::count(self, frame);
+            }
             Instr::ArrayPush(_) => {
-                self.exec(frame);
-                self.exec(frame);
-                self.arena.mutate(|mc, root| {
-                    let value = root.pop(mc).unwrap();
-                    let array = root.pop(mc).unwrap();
-                    array.as_array().unwrap().write(mc).push(value);
-                });
+                array::push(self, frame);
             }
-            Instr::ArrayPop(_) => todo!(),
-            Instr::ArrayInsert(_) => todo!(),
-            Instr::ArrayRemove(_) => todo!(),
-            Instr::ArrayRemoveFast(_) => todo!(),
-            Instr::ArrayGrow(_) => todo!(),
-            Instr::ArrayErase(_) => todo!(),
-            Instr::ArrayEraseFast(_) => todo!(),
-            Instr::ArrayLast(_) => todo!(),
+            Instr::ArrayPop(_) => {
+                array::pop(self, frame);
+            }
+            Instr::ArrayInsert(_) => {
+                array::insert(self, frame);
+            }
+            Instr::ArrayRemove(_) => {
+                array::remove(self, frame);
+            }
+            Instr::ArrayRemoveFast(_) => {
+                array::remove(self, frame);
+            }
+            Instr::ArrayGrow(_) => {
+                array::resize(self, frame);
+            }
+            Instr::ArrayErase(_) => {
+                array::erase(self, frame);
+            }
+            Instr::ArrayEraseFast(_) => {
+                array::erase(self, frame);
+            }
+            Instr::ArrayLast(_) => {
+                array::last(self, frame);
+            }
             Instr::ArrayElement(_) => {
-                self.exec(frame);
-                self.exec(frame);
-                self.binop(|array, index, _| {
-                    let index = index.unpinned().into_i32().unwrap();
-                    array.as_array().unwrap().read().get(index as usize).unwrap().clone()
-                });
+                array::element(self, frame);
             }
             Instr::StaticArraySize(_) => todo!(),
             Instr::StaticArrayFindFirst(_) => todo!(),
@@ -373,7 +392,7 @@ impl<'pool> VM<'pool> {
             }
             Instr::EnumToI32(_, _) => {
                 self.exec(frame);
-                self.unop(|val, _| Value::I32(val.into_enum_val().unwrap() as i32))
+                self.unop(|val, _| Value::I32(val.unpinned().into_enum_val().unwrap() as i32))
             }
             Instr::I32ToEnum(_, _) => {
                 self.exec(frame);
@@ -550,7 +569,7 @@ impl<'pool> VM<'pool> {
 }
 
 #[derive(Debug)]
-struct Frame<'pool> {
+pub struct Frame<'pool> {
     function: &'pool Function,
     offsets: Rc<Vec<u16>>,
     ip: usize,
