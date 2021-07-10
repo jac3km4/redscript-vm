@@ -30,9 +30,18 @@ pub enum Value<'gc> {
     BoxedStruct(GcCell<'gc, IndexMap<Value<'gc>>>),
     Obj(Obj<'gc>),
     Str(Gc<'gc, String>),
-    InternStr(VMIndex),
+    InternStr(StringType, VMIndex),
     Array(GcCell<'gc, Vec<Value<'gc>>>),
     Pinned(GcCell<'gc, Value<'gc>>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Collect)]
+#[collect(no_drop)]
+pub enum StringType {
+    String,
+    Name,
+    TweakDbId,
+    Resource,
 }
 
 impl<'gc> Value<'gc> {
@@ -49,7 +58,7 @@ impl<'gc> Value<'gc> {
         matches!(self, Value::Pinned(_))
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_string(&self, pool: &ConstantPool) -> String {
         match self {
             Value::I8(i) => i.to_string(),
             Value::I16(i) => i.to_string(),
@@ -66,10 +75,17 @@ impl<'gc> Value<'gc> {
             Value::PackedStruct(_) => todo!(),
             Value::BoxedStruct(_) => todo!(),
             Value::Obj(_) => todo!(),
-            Value::Str(_) => todo!(),
-            Value::InternStr(_) => todo!(),
+            Value::Str(str) => str.deref().to_owned(),
+            Value::InternStr(StringType::String, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
+            Value::InternStr(StringType::Name, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
+            Value::InternStr(StringType::TweakDbId, idx) => {
+                pool.tweakdb_ids.get(idx.to_pool()).unwrap().deref().to_owned()
+            }
+            Value::InternStr(StringType::Resource, idx) => {
+                pool.resources.get(idx.to_pool()).unwrap().deref().to_owned()
+            }
             Value::Array(_) => todo!(),
-            Value::Pinned(v) => v.read().to_string(),
+            Value::Pinned(v) => v.read().to_string(pool),
         }
     }
 
@@ -88,6 +104,7 @@ impl<'gc> Value<'gc> {
             (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
             (Value::EnumVal(lhs), Value::EnumVal(rhs)) => lhs == rhs,
             (Value::Str(lhs), Value::Str(rhs)) => lhs.as_str() == rhs.as_str(),
+            (Value::InternStr(ltyp, lidx), Value::InternStr(rtyp, ridx)) => ltyp == rtyp && lidx == ridx,
             _ => false,
         }
     }
@@ -104,11 +121,13 @@ pub enum Obj<'gc> {
     Instance(GcCell<'gc, Instance<'gc>>),
 }
 
-#[derive(Debug, Clone, Copy, Collect)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Collect)]
 #[collect(no_drop)]
 pub struct VMIndex(pub u32);
 
 impl VMIndex {
+    pub const ZERO: VMIndex = VMIndex(0);
+
     pub fn to_pool<A>(self) -> PoolIndex<A> {
         PoolIndex::new(self.0)
     }

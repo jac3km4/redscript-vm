@@ -10,7 +10,7 @@ use redscript::bytecode::{Instr, Location, Offset};
 use redscript::definition::{Function, Parameter};
 use value::Value;
 
-use crate::value::{Instance, Obj};
+use crate::value::{Instance, Obj, StringType, VMIndex};
 
 mod array;
 mod index_map;
@@ -147,7 +147,9 @@ impl<'pool> VM<'pool> {
             Instr::F64Const(val) => {
                 self.push(|_| Value::F64(val));
             }
-            Instr::NameConst(_) => todo!(),
+            Instr::NameConst(idx) => {
+                self.push(|_| Value::InternStr(StringType::Name, VMIndex(idx.index)));
+            }
             Instr::EnumConst(_, member) => {
                 let val = self.metadata.pool().enum_value(member).expect("Enum member not found");
                 self.push(|_| Value::EnumVal(val));
@@ -155,8 +157,12 @@ impl<'pool> VM<'pool> {
             Instr::StringConst(str) => {
                 self.push(|mc| Value::Str(Gc::allocate(mc, str)));
             }
-            Instr::TweakDbIdConst(_) => todo!(),
-            Instr::ResourceConst(_) => todo!(),
+            Instr::TweakDbIdConst(idx) => {
+                self.push(|_| Value::InternStr(StringType::TweakDbId, VMIndex(idx.index)));
+            }
+            Instr::ResourceConst(idx) => {
+                self.push(|_| Value::InternStr(StringType::Resource, VMIndex(idx.index)));
+            }
             Instr::TrueConst => {
                 self.push(|_| Value::Bool(true));
             }
@@ -416,7 +422,8 @@ impl<'pool> VM<'pool> {
             }
             Instr::ToString(_) => {
                 self.exec(frame);
-                self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string())));
+                let pool = self.metadata.pool();
+                self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string(pool))));
             }
             Instr::ToVariant(_) => todo!(),
             Instr::FromVariant(_) => todo!(),
@@ -497,8 +504,9 @@ impl<'pool> VM<'pool> {
     }
 
     pub fn pretty_result(&mut self) -> Option<String> {
+        let pool = self.metadata.pool();
         self.arena
-            .mutate(|_, root| root.stack.read().last().map(Value::to_string))
+            .mutate(|_, root| root.stack.read().last().map(|val| val.to_string(pool)))
     }
 
     fn exit(&mut self, frame: &Frame, returns: bool) {

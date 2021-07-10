@@ -19,6 +19,9 @@ pub fn default_pool() -> ConstantPool {
     register_prim("Float");
     register_prim("String");
     register_prim("Bool");
+    register_prim("CName");
+    register_prim("TweakDBID");
+    register_prim("ResRef");
 
     pool
 }

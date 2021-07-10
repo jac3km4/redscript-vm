@@ -7,7 +7,7 @@ use redscript::definition::{AnyDefinition, Class, Enum, Function, Type};
 
 use crate::index_map::IndexMap;
 use crate::interop::{IntoVMFunction, VMFunction};
-use crate::value::{Obj, VMIndex, Value};
+use crate::value::{Obj, StringType, VMIndex, Value};
 
 pub struct Metadata<'pool> {
     pool: &'pool ConstantPool,
@@ -254,9 +254,9 @@ impl TypeId {
             TypeId::F64 => Value::F64(0.),
             TypeId::F32 => Value::F32(0.),
             TypeId::Bool => Value::Bool(false),
-            TypeId::String => Value::InternStr(VMIndex(0)),
-            TypeId::CName => Value::InternStr(VMIndex(0)),
-            TypeId::TweakDbId => Value::InternStr(VMIndex(0)),
+            TypeId::String => Value::InternStr(StringType::String, VMIndex::ZERO),
+            TypeId::CName => Value::InternStr(StringType::Name, VMIndex::ZERO),
+            TypeId::TweakDbId => Value::InternStr(StringType::TweakDbId, VMIndex::ZERO),
             TypeId::Variant => todo!(),
             TypeId::NodeRef => todo!(),
             TypeId::CRUID => todo!(),
@@ -296,6 +296,7 @@ impl TypeId {
                     "CRUID" => TypeId::CRUID,
                     "CRUIDRef" => TypeId::CRUID,
                     "redResourceReferenceScriptToken" => TypeId::String,
+                    "ResRef" => TypeId::String,
                     _ => panic!("Unknown primitive: {}", name),
                 };
                 Some(res)
