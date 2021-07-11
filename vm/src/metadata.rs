@@ -228,6 +228,7 @@ pub enum TypeId {
     String,
     CName,
     TweakDbId,
+    ResRef,
     Variant,
     NodeRef,
     CRUID,
@@ -257,6 +258,7 @@ impl TypeId {
             TypeId::String => Value::InternStr(StringType::String, VMIndex::ZERO),
             TypeId::CName => Value::InternStr(StringType::Name, VMIndex::ZERO),
             TypeId::TweakDbId => Value::InternStr(StringType::TweakDbId, VMIndex::ZERO),
+            TypeId::ResRef => Value::InternStr(StringType::Resource, VMIndex::ZERO),
             TypeId::Variant => todo!(),
             TypeId::NodeRef => todo!(),
             TypeId::CRUID => todo!(),
@@ -296,7 +298,7 @@ impl TypeId {
                     "CRUID" => TypeId::CRUID,
                     "CRUIDRef" => TypeId::CRUID,
                     "redResourceReferenceScriptToken" => TypeId::String,
-                    "ResRef" => TypeId::String,
+                    "ResRef" => TypeId::ResRef,
                     _ => panic!("Unknown primitive: {}", name),
                 };
                 Some(res)
