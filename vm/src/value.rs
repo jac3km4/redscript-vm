@@ -36,7 +36,7 @@ pub enum Value<'gc> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Collect)]
-#[collect(no_drop)]
+#[collect(require_static)]
 pub enum StringType {
     String,
     Name,
@@ -111,7 +111,7 @@ impl<'gc> Value<'gc> {
 }
 
 #[derive(Debug, Clone, Collect)]
-#[collect(no_drop)]
+#[collect(require_static)]
 pub struct PackedStruct([u8; 0xf]);
 
 #[derive(Debug, Clone, Collect, EnumAsInner)]
@@ -122,7 +122,7 @@ pub enum Obj<'gc> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Collect)]
-#[collect(no_drop)]
+#[collect(require_static)]
 pub struct VMIndex(pub u32);
 
 impl VMIndex {
