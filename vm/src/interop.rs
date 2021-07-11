@@ -108,3 +108,10 @@ derive_function_out!([A], [], a);
 derive_function_out!([A, B], [b], a);
 derive_function_out!([A, B, C], [c, b], a);
 derive_function_out!([A, B, C, D], [d, c, b], a);
+
+#[macro_export]
+macro_rules! args {
+    ( $( $exprs:expr ),* ) => {
+       |mc| vec![$($exprs.into_vm(mc)),*]
+    };
+}

@@ -231,3 +231,10 @@ impl<'gc> IntoVM<'gc> for String {
         Value::Str(Gc::allocate(mc, self))
     }
 }
+
+impl<'gc> IntoVM<'gc> for &'static str {
+    #[inline]
+    fn into_vm<'ctx>(self, mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
+        Value::Str(Gc::allocate(mc, self.to_owned()))
+    }
+}

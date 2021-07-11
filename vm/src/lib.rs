@@ -4,6 +4,7 @@ use std::usize;
 
 use gc_arena::{make_arena, ArenaParameters, Collect, Gc, GcCell, MutationContext};
 use index_map::IndexMap;
+use interop::FromVM;
 use metadata::Metadata;
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::bytecode::{Instr, Location, Offset};
@@ -443,21 +444,65 @@ impl<'pool> VM<'pool> {
         Action::Continue
     }
 
-    pub fn call_with(&mut self, idx: PoolIndex<Function>, params: &[PoolIndex<Parameter>]) {
+    #[inline]
+    pub fn call<F, A>(&mut self, idx: PoolIndex<Function>, args: F) -> A
+    where
+        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+        A: for<'gc> FromVM<'gc>,
+    {
+        let pool = self.metadata.pool();
+        self.call_with_callback(idx, args, |res| FromVM::from_vm(res.unwrap(), pool).unwrap())
+    }
+
+    #[inline]
+    pub fn call_with_callback<F, C, A>(&mut self, idx: PoolIndex<Function>, args: F, cb: C) -> A
+    where
+        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+        C: for<'gc> Fn(Option<Value<'gc>>) -> A,
+    {
+        self.call_void(idx, args);
+        self.arena.mutate(|mc, root| cb(root.pop(mc)))
+    }
+
+    pub fn call_void<F>(&mut self, idx: PoolIndex<Function>, args: F)
+    where
+        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+    {
+        let function = self.metadata.pool().function(idx).unwrap();
+        self.arena.mutate(|mc, root| {
+            let args = args(mc);
+            if args.len() != function.parameters.len() {
+                panic!("Invalid number of parameters")
+            }
+            for arg in args {
+                root.push(arg, mc);
+            }
+        });
+        self.call_with_params(idx, &function.parameters);
+    }
+
+    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame) {
+        let function = self.metadata.pool().function(idx).unwrap();
+        let mut indexes = Vec::with_capacity(function.parameters.len());
+
+        for param_idx in &function.parameters {
+            let param = self.metadata.pool().parameter(*param_idx).unwrap();
+            if !matches!(frame.current_instr(), Some(Instr::Nop)) {
+                indexes.push(*param_idx);
+            }
+            self.exec_with(frame, param.flags.is_out());
+        }
+        if matches!(frame.current_instr(), Some(Instr::ParamEnd)) {
+            frame.skip(1);
+        }
+        self.call_with_params(idx, &indexes);
+    }
+
+    fn call_with_params(&mut self, idx: PoolIndex<Function>, params: &[PoolIndex<Parameter>]) {
         let function = self.metadata.pool().function(idx).unwrap();
 
         if function.flags.is_native() {
-            let call = self
-                .metadata
-                .get_native(idx)
-                .unwrap_or_else(|| panic!("Native {} is not defined", idx.index));
-            let pool = self.metadata.pool();
-
-            self.arena.mutate(|mc, root| {
-                if let Some(res) = call(mc, root, pool) {
-                    root.push(res, mc);
-                }
-            });
+            self.call_native(idx);
             return;
         }
 
@@ -486,21 +531,18 @@ impl<'pool> VM<'pool> {
         self.exit(&frame, returns);
     }
 
-    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame) {
-        let function = self.metadata.pool().function(idx).unwrap();
-        let mut indexes = Vec::with_capacity(function.parameters.len());
+    fn call_native(&mut self, idx: PoolIndex<Function>) {
+        let call = self
+            .metadata
+            .get_native(idx)
+            .unwrap_or_else(|| panic!("Native {} is not defined", idx.index));
+        let pool = self.metadata.pool();
 
-        for param_idx in &function.parameters {
-            let param = self.metadata.pool().parameter(*param_idx).unwrap();
-            if !matches!(frame.current_instr(), Some(Instr::Nop)) {
-                indexes.push(*param_idx);
+        self.arena.mutate(|mc, root| {
+            if let Some(res) = call(mc, root, pool) {
+                root.push(res, mc);
             }
-            self.exec_with(frame, param.flags.is_out());
-        }
-        if matches!(frame.current_instr(), Some(Instr::ParamEnd)) {
-            frame.skip(1);
-        }
-        self.call_with(idx, &indexes);
+        });
     }
 
     pub fn pretty_result(&mut self) -> Option<String> {
