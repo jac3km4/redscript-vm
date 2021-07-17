@@ -16,8 +16,16 @@ pub fn default_pool() -> ConstantPool {
     };
 
     register_prim("");
+    register_prim("Int8");
+    register_prim("Int16");
     register_prim("Int32");
+    register_prim("Int64");
+    register_prim("Uint8");
+    register_prim("Uint16");
+    register_prim("Uint32");
+    register_prim("Uint64");
     register_prim("Float");
+    register_prim("Double");
     register_prim("String");
     register_prim("Bool");
     register_prim("CName");
