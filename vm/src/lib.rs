@@ -449,8 +449,14 @@ impl<'pool> VM<'pool> {
                 let pool = self.metadata.pool();
                 self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string(pool))));
             }
-            Instr::ToVariant(_) => todo!(),
-            Instr::FromVariant(_) => todo!(),
+            Instr::ToVariant(_) => {
+                self.exec(frame);
+            }
+            Instr::FromVariant(typ) => {
+                let typ = self.metadata.get_type(typ).unwrap().clone();
+                self.exec(frame);
+                self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) })
+            }
             Instr::VariantIsValid => todo!(),
             Instr::VariantIsRef => todo!(),
             Instr::VariantIsArray => todo!(),

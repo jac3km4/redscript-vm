@@ -266,7 +266,7 @@ impl TypeId {
             TypeId::CName => Value::InternStr(StringType::Name, VMIndex::ZERO),
             TypeId::TweakDbId => Value::InternStr(StringType::TweakDbId, VMIndex::ZERO),
             TypeId::ResRef => Value::InternStr(StringType::Resource, VMIndex::ZERO),
-            TypeId::Variant => todo!(),
+            TypeId::Variant => Value::Obj(Obj::Null),
             TypeId::NodeRef => todo!(),
             TypeId::CRUID => todo!(),
             TypeId::Ref(_) => Value::Obj(Obj::Null),
