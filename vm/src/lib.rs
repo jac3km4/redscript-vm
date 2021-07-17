@@ -223,7 +223,9 @@ impl<'pool> VM<'pool> {
                 let sp = self.arena.mutate(|_, root| root.stack.read().len());
                 self.exec(frame);
                 let mut pos = frame.location().unwrap();
-                while let Some(Instr::SwitchLabel(next, body)) = frame.next_instr() {
+                while let Some(Instr::SwitchLabel(next, body)) = frame.current_instr() {
+                    frame.next_instr();
+
                     self.copy(sp);
                     self.exec(frame);
                     self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
