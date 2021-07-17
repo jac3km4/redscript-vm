@@ -54,6 +54,14 @@ impl<'gc> Value<'gc> {
     }
 
     #[inline]
+    pub fn pin<'ctx>(&mut self, mc: MutationContext<'gc, 'ctx>) {
+        if !self.is_pinned() {
+            let pinned = Value::Pinned(GcCell::allocate(mc, self.clone()));
+            *self = pinned;
+        }
+    }
+
+    #[inline]
     pub fn is_pinned(&self) -> bool {
         matches!(self, Value::Pinned(_))
     }
@@ -110,10 +118,6 @@ impl<'gc> Value<'gc> {
     }
 }
 
-#[derive(Debug, Clone, Collect)]
-#[collect(require_static)]
-pub struct PackedStruct([u8; 0xf]);
-
 #[derive(Debug, Clone, Collect, EnumAsInner)]
 #[collect(no_drop)]
 pub enum Obj<'gc> {
@@ -142,23 +146,19 @@ pub struct Instance<'gc> {
 }
 
 impl<'gc> Instance<'gc> {
-    pub fn new<'ctx, 'pool>(
-        idx: PoolIndex<Class>,
-        metadata: &mut Metadata<'pool>,
-        mc: MutationContext<'gc, 'ctx>,
-    ) -> Self {
+    pub fn new<'ctx, 'pool>(idx: PoolIndex<Class>, meta: &mut Metadata<'pool>, mc: MutationContext<'gc, 'ctx>) -> Self {
         let mut current = idx;
         let mut fields = IndexMap::new();
         while !current.is_undefined() {
-            let class = metadata.pool().class(current).unwrap();
+            let class = meta.pool().class(current).unwrap();
             for field_idx in &class.fields {
-                let field = metadata.pool().field(*field_idx).unwrap();
-                let typ = metadata.get_type(field.type_).unwrap();
-                fields.put(*field_idx, typ.default_value(mc, metadata.pool()));
+                let field = meta.pool().field(*field_idx).unwrap();
+                let typ = meta.get_type(field.type_).unwrap();
+                fields.put(*field_idx, typ.default_value(mc, meta));
             }
-            current = metadata.pool().class(current).unwrap().base;
+            current = meta.pool().class(current).unwrap().base;
         }
-        let vtable = metadata.get_vtable(idx).unwrap();
+        let vtable = meta.get_vtable(idx).unwrap();
 
         Self {
             tag: VMIndex(idx.index),
@@ -166,6 +166,14 @@ impl<'gc> Instance<'gc> {
             vtable,
         }
     }
+}
+
+#[derive(Debug, Clone, Collect)]
+#[collect(require_static)]
+pub struct PackedStruct([u8; PackedStruct::MAX_SIZE]);
+
+impl PackedStruct {
+    pub const MAX_SIZE: usize = 0xf;
 }
 
 impl<'gc> FromVM<'gc> for i32 {

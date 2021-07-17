@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::iter::FromIterator;
 use std::usize;
 
 use gc_arena::{Collect, CollectionContext};
@@ -42,6 +43,13 @@ impl<V> IndexMap<V> {
 impl<V> Default for IndexMap<V> {
     fn default() -> Self {
         Self { values: IntMap::new() }
+    }
+}
+
+impl<A, V> FromIterator<(PoolIndex<A>, V)> for IndexMap<V> {
+    fn from_iter<I: IntoIterator<Item = (PoolIndex<A>, V)>>(iter: I) -> Self {
+        let values = iter.into_iter().map(|(k, v)| (k.index as u64, v)).collect();
+        Self { values }
     }
 }
 

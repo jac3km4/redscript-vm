@@ -176,37 +176,46 @@ impl<'pool> VM<'pool> {
             }
             Instr::Target(_) => todo!(),
             Instr::Local(idx) => {
-                self.arena.mutate(|mc, root| {
-                    let mut frames = root.frames.write(mc);
-                    let local = frames.last_mut().unwrap().get_mut(idx).unwrap();
-                    if pin && !local.is_pinned() {
-                        let pinned = Value::Pinned(GcCell::allocate(mc, local.clone()));
-                        *local = pinned.clone();
-                        root.push(pinned, mc);
-                    } else {
-                        root.push(local.clone(), mc);
+                self.with_local(idx, |local, mc, root| {
+                    if pin {
+                        local.pin(mc);
                     }
+                    root.push(local.clone(), mc);
                 });
             }
             Instr::Param(idx) => {
-                self.arena.mutate(|mc, root| {
-                    let value = root.local(idx).unwrap().clone();
-                    root.push(value, mc);
+                self.with_local(idx, |local, mc, root| {
+                    if pin {
+                        local.pin(mc);
+                    }
+                    root.push(local.clone(), mc);
                 });
             }
             Instr::ObjectField(idx) => {
                 self.arena.mutate(|mc, root| {
                     let ctx = root.contexts.read();
-                    let instance = ctx.last().unwrap().as_instance().unwrap();
-                    let val = instance.read().fields.get(idx).unwrap().clone();
-                    root.push(val, mc)
+                    let cell = ctx.last().unwrap().as_instance().unwrap();
+                    let mut instance = cell.write(mc);
+                    let val = instance.fields.get_mut(idx).unwrap();
+                    if pin {
+                        val.pin(mc);
+                    }
+                    root.push(val.clone(), mc)
                 });
             }
             Instr::StructField(idx) => {
                 self.exec(frame);
-                self.unop(|v, _| match v {
-                    Value::BoxedStruct(cell) => cell.read().get(idx).unwrap().clone(),
-                    _ => todo!(),
+                self.unop(|val, mc| match val {
+                    Value::BoxedStruct(cell) => {
+                        let mut fields = cell.write(mc);
+                        let val = fields.get_mut(idx).unwrap();
+                        if pin {
+                            val.pin(mc);
+                        }
+                        val.clone()
+                    }
+                    Value::PackedStruct(_) => todo!(),
+                    _ => panic!("Not a struct"),
                 });
             }
             Instr::ExternalVar => todo!(),
@@ -251,7 +260,21 @@ impl<'pool> VM<'pool> {
                 self.exec(frame);
                 frame.seek(exit.absolute(location.unwrap()));
             }
-            Instr::Construct(_, _) => todo!(),
+            Instr::Construct(args, class_idx) => {
+                for _ in 0..args {
+                    self.exec(frame);
+                }
+                let class = self.metadata.pool().class(class_idx).unwrap();
+                let fields = class.fields.iter();
+
+                self.arena.mutate(|mc, root| {
+                    let mut stack = root.stack.write(mc);
+                    let range = (stack.len() - args as usize)..;
+                    let args = stack.drain(range);
+                    let data = fields.copied().zip(args).collect();
+                    stack.push(Value::BoxedStruct(GcCell::allocate(mc, data)))
+                });
+            }
             Instr::InvokeStatic(_, _, idx) => {
                 self.call_static(idx, frame);
             }
@@ -518,13 +541,13 @@ impl<'pool> VM<'pool> {
             for idx in &function.locals {
                 let local = meta.pool().local(*idx).unwrap();
                 let typ = meta.get_type(local.type_).unwrap();
-                locals.put(*idx, typ.default_value(mc, meta.pool()));
+                locals.put(*idx, typ.default_value(mc, meta));
             }
             root.frames.write(mc).push(locals);
         });
 
         let sp = self.arena.mutate(|_, root| root.stack.read().len());
-        let offsets = self.metadata.get_offsets(idx).unwrap();
+        let offsets = self.metadata.get_code_offsets(idx).unwrap();
 
         let mut frame = Frame::new(function, offsets, sp);
         let returns = self.run(&mut frame);
@@ -532,10 +555,10 @@ impl<'pool> VM<'pool> {
     }
 
     fn call_native(&mut self, idx: PoolIndex<Function>) {
-        let call = self
-            .metadata
-            .get_native(idx)
-            .unwrap_or_else(|| panic!("Native {} is not defined", idx.index));
+        let call = self.metadata.get_native(idx).unwrap_or_else(|| {
+            let name = self.metadata.pool().definition_name(idx).unwrap();
+            panic!("Native {} is not defined", name)
+        });
         let pool = self.metadata.pool();
 
         self.arena.mutate(|mc, root| {
@@ -543,12 +566,6 @@ impl<'pool> VM<'pool> {
                 root.push(res, mc);
             }
         });
-    }
-
-    pub fn pretty_result(&mut self) -> Option<String> {
-        let pool = self.metadata.pool();
-        self.arena
-            .mutate(|_, root| root.stack.read().last().map(|val| val.to_string(pool)))
     }
 
     fn exit(&mut self, frame: &Frame, returns: bool) {
@@ -576,12 +593,14 @@ impl<'pool> VM<'pool> {
         match frame.next_instr().unwrap() {
             Instr::Local(idx) => {
                 self.exec(frame);
-
-                self.arena.mutate(|mc, root| {
-                    let mut frames = root.frames.write(mc);
-                    let local = frames.last_mut().unwrap().get_mut(idx).unwrap();
-                    let value = root.pop(mc).unwrap();
-                    *local = value;
+                self.with_local(idx, |local, mc, root| {
+                    *local = root.pop(mc).unwrap();
+                });
+            }
+            Instr::Param(idx) => {
+                self.exec(frame);
+                self.with_local(idx, |local, mc, root| {
+                    *local = root.pop(mc).unwrap();
                 });
             }
             Instr::ObjectField(idx) => {
@@ -593,6 +612,20 @@ impl<'pool> VM<'pool> {
                     let field = instance.fields.get_mut(idx).unwrap();
                     let value = root.pop(mc).unwrap();
                     *field = value;
+                });
+            }
+            Instr::StructField(idx) => {
+                self.exec(frame);
+                self.exec(frame);
+
+                self.arena.mutate(|mc, root| {
+                    let val = root.pop(mc).unwrap();
+                    let str = root.pop(mc).unwrap();
+                    match str {
+                        Value::BoxedStruct(str) => str.write(mc).put(idx, val),
+                        Value::PackedStruct(_) => todo!(),
+                        _ => panic!("Not a struct"),
+                    };
                 });
             }
             Instr::Context(_) => {
@@ -615,6 +648,17 @@ impl<'pool> VM<'pool> {
             }
             _ => panic!("Unexpected assign instruction"),
         }
+    }
+
+    fn with_local<F, A>(&mut self, idx: PoolIndex<A>, f: F)
+    where
+        F: for<'gc, 'ctx> FnOnce(&'ctx mut Value<'gc>, MutationContext<'gc, 'ctx>, &'ctx VMRoot<'gc>),
+    {
+        self.arena.mutate(|mc, root| {
+            let mut frames = root.frames.write(mc);
+            let local = frames.last_mut().unwrap().get_mut(idx).unwrap();
+            f(local, mc, root)
+        });
     }
 }
 
@@ -680,12 +724,6 @@ pub struct VMRoot<'gc> {
 }
 
 impl<'gc> VMRoot<'gc> {
-    #[inline]
-    fn local<A>(&self, idx: PoolIndex<A>) -> Option<Value<'gc>> {
-        let val = self.frames.read();
-        val.last()?.get(idx).cloned()
-    }
-
     #[inline]
     fn pop<'ctx>(&self, mc: MutationContext<'gc, 'ctx>) -> Option<Value<'gc>> {
         self.stack.write(mc).pop()

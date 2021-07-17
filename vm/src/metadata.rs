@@ -30,10 +30,12 @@ impl<'pool> Metadata<'pool> {
                     types.put(idx, TypeId::from(idx.cast(), pool, &symbols).unwrap());
                 }
                 AnyDefinition::Function(_) => {
-                    function_meta.put(idx, FunctionMetadata::new());
+                    function_meta.put(idx, FunctionMetadata::default());
                 }
-                AnyDefinition::Class(_) => {
-                    class_meta.put(idx, ClassMetadata::new());
+                AnyDefinition::Class(ref class) => {
+                    if !class.flags.is_struct() {
+                        class_meta.put(idx, ClassMetadata::default());
+                    }
                 }
                 _ => {}
             }
@@ -69,7 +71,7 @@ impl<'pool> Metadata<'pool> {
     }
 
     #[inline]
-    pub fn get_offsets(&mut self, idx: PoolIndex<Function>) -> Option<Rc<Vec<u16>>> {
+    pub fn get_code_offsets(&mut self, idx: PoolIndex<Function>) -> Option<Rc<Vec<u16>>> {
         let meta = self.function_meta.get_mut(idx)?;
         let fun = self.pool.function(idx).ok()?;
         Some(meta.get_offsets(fun))
@@ -147,10 +149,6 @@ struct ClassMetadata {
 }
 
 impl ClassMetadata {
-    fn new() -> Self {
-        Self { vtable: None }
-    }
-
     fn get_vtable(&mut self, idx: PoolIndex<Class>, pool: &ConstantPool) -> Option<Rc<IndexMap<VMIndex>>> {
         match &self.vtable {
             Some(rc) => Some(rc.clone()),
@@ -181,19 +179,18 @@ impl ClassMetadata {
     }
 }
 
+impl Default for ClassMetadata {
+    fn default() -> Self {
+        Self { vtable: None }
+    }
+}
+
 struct FunctionMetadata {
     offsets: Option<Rc<Vec<u16>>>,
     native: Option<Box<VMFunction>>,
 }
 
 impl FunctionMetadata {
-    fn new() -> Self {
-        Self {
-            offsets: None,
-            native: None,
-        }
-    }
-
     fn get_offsets(&mut self, function: &Function) -> Rc<Vec<u16>> {
         match &self.offsets {
             Some(offsets) => offsets.clone(),
@@ -213,6 +210,16 @@ impl FunctionMetadata {
     }
 }
 
+impl Default for FunctionMetadata {
+    fn default() -> Self {
+        Self {
+            offsets: None,
+            native: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum TypeId {
     I64,
     I32,
@@ -242,7 +249,7 @@ pub enum TypeId {
 }
 
 impl TypeId {
-    pub fn default_value<'gc, 'ctx>(&self, mc: MutationContext<'gc, 'ctx>, _pool: &ConstantPool) -> Value<'gc> {
+    pub fn default_value<'gc, 'ctx>(&self, mc: MutationContext<'gc, 'ctx>, meta: &Metadata) -> Value<'gc> {
         match self {
             TypeId::I64 => Value::I64(0),
             TypeId::I32 => Value::I32(0),
@@ -266,7 +273,16 @@ impl TypeId {
             TypeId::WRef(_) => Value::Obj(Obj::Null),
             TypeId::ScriptRef(_) => todo!(),
             TypeId::Enum(_) => Value::EnumVal(0),
-            TypeId::Struct(_) => todo!(),
+            TypeId::Struct(class_idx) => {
+                let class = meta.pool().class(*class_idx).unwrap();
+                let fields = class.fields.iter().copied();
+                let values = fields.clone().map(|field_idx| {
+                    let field = meta.pool().field(field_idx).unwrap();
+                    let typ = meta.get_type(field.type_).unwrap();
+                    typ.default_value(mc, meta)
+                });
+                Value::BoxedStruct(GcCell::allocate(mc, fields.zip(values).collect()))
+            }
             TypeId::Array(_) => Value::Array(GcCell::allocate(mc, vec![])),
             TypeId::StaticArray(_, _) => todo!(),
         }
