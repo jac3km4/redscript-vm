@@ -8,7 +8,7 @@ use redscript::bundle::PoolIndex;
 
 use crate::value::Value;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexMap<V> {
     values: IntMap<V>,
 }

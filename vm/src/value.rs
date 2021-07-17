@@ -46,7 +46,7 @@ pub enum StringType {
 
 impl<'gc> Value<'gc> {
     #[inline]
-    pub fn unpinned(self) -> Value<'gc> {
+    pub fn unpinned(self) -> Self {
         match self {
             Value::Pinned(cell) => cell.read().clone(),
             other => other,
@@ -64,6 +64,14 @@ impl<'gc> Value<'gc> {
     #[inline]
     pub fn is_pinned(&self) -> bool {
         matches!(self, Value::Pinned(_))
+    }
+
+    #[inline]
+    pub fn copied(&self, mc: MutationContext<'gc, '_>) -> Self {
+        match self {
+            Value::BoxedStruct(str) => Value::BoxedStruct(GcCell::allocate(mc, str.read().clone())),
+            other => other.clone(),
+        }
     }
 
     pub fn to_string(&self, pool: &ConstantPool) -> String {

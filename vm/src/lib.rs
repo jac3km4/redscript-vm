@@ -180,7 +180,7 @@ impl<'pool> VM<'pool> {
                     if pin {
                         local.pin(mc);
                     }
-                    root.push(local.clone(), mc);
+                    root.push(local.copied(mc), mc);
                 });
             }
             Instr::Param(idx) => {
@@ -188,7 +188,7 @@ impl<'pool> VM<'pool> {
                     if pin {
                         local.pin(mc);
                     }
-                    root.push(local.clone(), mc);
+                    root.push(local.copied(mc), mc);
                 });
             }
             Instr::ObjectField(idx) => {
@@ -200,19 +200,19 @@ impl<'pool> VM<'pool> {
                     if pin {
                         val.pin(mc);
                     }
-                    root.push(val.clone(), mc)
+                    root.push(val.copied(mc), mc)
                 });
             }
             Instr::StructField(idx) => {
                 self.exec(frame);
-                self.unop(|val, mc| match val {
+                self.unop(|val, mc| match val.unpinned() {
                     Value::BoxedStruct(cell) => {
                         let mut fields = cell.write(mc);
                         let val = fields.get_mut(idx).unwrap();
                         if pin {
                             val.pin(mc);
                         }
-                        val.clone()
+                        val.copied(mc)
                     }
                     Value::PackedStruct(_) => todo!(),
                     _ => panic!("Not a struct"),
@@ -621,7 +621,7 @@ impl<'pool> VM<'pool> {
                 self.arena.mutate(|mc, root| {
                     let val = root.pop(mc).unwrap();
                     let str = root.pop(mc).unwrap();
-                    match str {
+                    match str.unpinned() {
                         Value::BoxedStruct(str) => str.write(mc).put(idx, val),
                         Value::PackedStruct(_) => todo!(),
                         _ => panic!("Not a struct"),
