@@ -27,7 +27,7 @@ pub trait IntoVMFunction<A, R> {
     fn into_vm_function(self) -> Box<VMFunction>;
 }
 
-macro_rules! derive_function_unit {
+macro_rules! impl_function_unit {
     ( [$( $types:ident ),*], [$( $locals:ident ),*] ) => {
         #[allow(unused_variables)]
         impl<$($types,)* F> IntoVMFunction<($($types,)*), ()> for F
@@ -46,13 +46,13 @@ macro_rules! derive_function_unit {
     };
 }
 
-derive_function_unit!([], []);
-derive_function_unit!([A], [a]);
-derive_function_unit!([A, B], [b, a]);
-derive_function_unit!([A, B, C], [c, b, a]);
-derive_function_unit!([A, B, C, D], [d, c, b, a]);
+impl_function_unit!([], []);
+impl_function_unit!([A], [a]);
+impl_function_unit!([A, B], [b, a]);
+impl_function_unit!([A, B, C], [c, b, a]);
+impl_function_unit!([A, B, C, D], [d, c, b, a]);
 
-macro_rules! derive_function_ret {
+macro_rules! impl_function_ret {
     ( [$( $types:ident ),*], [$( $locals:ident ),*] ) => {
         #[allow(unused_variables)]
         impl<$($types,)* R, F> IntoVMFunction<($($types,)*), Ret<R>> for F
@@ -71,13 +71,13 @@ macro_rules! derive_function_ret {
     };
 }
 
-derive_function_ret!([], []);
-derive_function_ret!([A], [a]);
-derive_function_ret!([A, B], [b, a]);
-derive_function_ret!([A, B, C], [c, b, a]);
-derive_function_ret!([A, B, C, D], [d, c, b, a]);
+impl_function_ret!([], []);
+impl_function_ret!([A], [a]);
+impl_function_ret!([A, B], [b, a]);
+impl_function_ret!([A, B, C], [c, b, a]);
+impl_function_ret!([A, B, C, D], [d, c, b, a]);
 
-macro_rules! derive_function_out {
+macro_rules! impl_function_out {
     ( [ $type:ident $( ,$types:ident )*], [ $( $locals:ident ),*], $local:ident ) => {
         #[allow(unused_variables)]
         impl<$type, $($types,)* R, F> IntoVMFunction<($type, $($types,)*), RetOut<R, $type>> for F
@@ -104,10 +104,10 @@ macro_rules! derive_function_out {
     };
 }
 
-derive_function_out!([A], [], a);
-derive_function_out!([A, B], [b], a);
-derive_function_out!([A, B, C], [c, b], a);
-derive_function_out!([A, B, C, D], [d, c, b], a);
+impl_function_out!([A], [], a);
+impl_function_out!([A, B], [b], a);
+impl_function_out!([A, B, C], [c, b], a);
+impl_function_out!([A, B, C, D], [d, c, b], a);
 
 #[macro_export]
 macro_rules! args {

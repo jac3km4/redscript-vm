@@ -218,32 +218,37 @@ impl PackedStruct {
     pub const MAX_SIZE: usize = 0xf;
 }
 
-impl<'gc> FromVM<'gc> for i32 {
-    fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
-        match val.unpinned() {
-            Value::I32(i) => Ok(i),
-            _ => Err("Invalid argument, expected i32"),
+macro_rules! impl_prim_conversions {
+    ($typ:ty, $constructor:ident) => {
+        impl<'gc> IntoVM<'gc> for $typ {
+            #[inline]
+            fn into_vm<'ctx>(self, _mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
+                Value::$constructor(self)
+            }
         }
-    }
+
+        impl<'gc> FromVM<'gc> for $typ {
+            fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
+                match val.unpinned() {
+                    Value::$constructor(i) => Ok(i),
+                    _ => Err(concat!("Invalid argument, expected ", stringify!($constructor))),
+                }
+            }
+        }
+    };
 }
 
-impl<'gc> FromVM<'gc> for f32 {
-    fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
-        match val.unpinned() {
-            Value::F32(i) => Ok(i),
-            _ => Err("Invalid argument, expected f32"),
-        }
-    }
-}
-
-impl<'gc> FromVM<'gc> for bool {
-    fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
-        match val.unpinned() {
-            Value::Bool(i) => Ok(i),
-            _ => Err("Invalid argument, expected bool"),
-        }
-    }
-}
+impl_prim_conversions!(i8, I8);
+impl_prim_conversions!(i16, I16);
+impl_prim_conversions!(i32, I32);
+impl_prim_conversions!(i64, I64);
+impl_prim_conversions!(u8, U8);
+impl_prim_conversions!(u16, U16);
+impl_prim_conversions!(u32, U32);
+impl_prim_conversions!(u64, U64);
+impl_prim_conversions!(f32, F32);
+impl_prim_conversions!(f64, F64);
+impl_prim_conversions!(bool, Bool);
 
 impl<'gc> FromVM<'gc> for String {
     fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
@@ -251,27 +256,6 @@ impl<'gc> FromVM<'gc> for String {
             Value::Str(i) => Ok(i.deref().clone()),
             _ => Err("Invalid argument, expected String"),
         }
-    }
-}
-
-impl<'gc> IntoVM<'gc> for i32 {
-    #[inline]
-    fn into_vm<'ctx>(self, _mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
-        Value::I32(self)
-    }
-}
-
-impl<'gc> IntoVM<'gc> for f32 {
-    #[inline]
-    fn into_vm<'ctx>(self, _mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
-        Value::F32(self)
-    }
-}
-
-impl<'gc> IntoVM<'gc> for bool {
-    #[inline]
-    fn into_vm<'ctx>(self, _mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
-        Value::Bool(self)
     }
 }
 
