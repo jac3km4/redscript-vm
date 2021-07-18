@@ -48,7 +48,7 @@ You can also invoke scripts from the compiled bytecode:
 Crocodile poop used to be used as a contraception
 ```
 The shell comes with a basic test framework too.
-You can use it to test your mods against the game:
+You can use it to test your mods against the game by defining some test suites, for instance a `test/myModSuite.reds`:
 ```swift
 public class MyModTestSuite {
   public func SpawnVehicleFlagShouldBeTrue() {
