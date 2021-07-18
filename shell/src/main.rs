@@ -18,10 +18,17 @@ const HISTORY_FILE: &'static str = "redscript-history.txt";
 
 fn main() -> Result<(), Error> {
     let location = std::env::current_dir()?.join("redscript.toml");
-    let config = ShellConfig::load(&location)?;
-    let mut file = io::BufReader::new(File::open(&config.bundle_path)?);
-    let bundle = ScriptBundle::load(&mut file)?;
-    repl(bundle.pool, &config)
+    match ShellConfig::load(&location) {
+        Ok(config) => {
+            let mut file = io::BufReader::new(File::open(&config.bundle_path)?);
+            let bundle = ScriptBundle::load(&mut file)?;
+            repl(bundle.pool, &config)
+        }
+        Err(error) => {
+            println!("Failed to load the shell config (redscript.toml is required)");
+            Err(error)
+        }
+    }
 }
 
 fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
