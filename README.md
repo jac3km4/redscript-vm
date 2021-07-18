@@ -60,5 +60,5 @@ public class MyModTestSuite {
 You can run your test suite with a shell command:
 ```
 >> test MyModTestSuite
-+  spawn vehicle flag should be true=
++  spawn vehicle flag should be true
 ```
