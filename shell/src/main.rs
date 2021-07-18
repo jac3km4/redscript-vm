@@ -1,0 +1,149 @@
+use std::fs::File;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use redscript::ast::Pos;
+use redscript::bundle::{ConstantPool, ScriptBundle};
+use redscript::error::Error;
+use redscript_compiler::source_map::{Files, SourceFilter};
+use redscript_compiler::Compiler;
+use redscript_vm::{args, native, VM};
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
+use serde::Deserialize;
+
+mod test;
+
+const HISTORY_FILE: &'static str = "redscript-history.txt";
+
+fn main() -> Result<(), Error> {
+    let location = std::env::current_dir()?.join("redscript.toml");
+    let config = ShellConfig::load(&location)?;
+    let mut file = io::BufReader::new(File::open(&config.bundle_path)?);
+    let bundle = ScriptBundle::load(&mut file)?;
+    repl(bundle.pool, &config)
+}
+
+fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
+    let mut rl = Editor::<()>::new();
+    if rl.load_history(HISTORY_FILE).is_err() {
+        println!("No previous history");
+    }
+    loop {
+        let readline = rl.readline(">> ");
+        match readline {
+            Ok(line) => {
+                rl.add_history_entry(line.as_str());
+                match Command::parse(&line) {
+                    Ok(cmd) => match execute(cmd, pool.clone(), config) {
+                        Ok(true) => break,
+                        Ok(false) => {}
+                        Err(err) => println!("{:?}", err),
+                    },
+                    Err(err) => println!("{}", err),
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                println!("Error: {}", err);
+                break;
+            }
+        }
+    }
+    rl.save_history(HISTORY_FILE).unwrap();
+    Ok(())
+}
+
+fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result<bool, Error> {
+    match command {
+        Command::RunMain => {
+            run_function(pool, "main;", config)?;
+            Ok(false)
+        }
+        Command::Run(func) => {
+            run_function(pool, func, config)?;
+            Ok(false)
+        }
+        Command::Test(suite) => {
+            test::run_suite(pool, suite, config)?;
+            Ok(false)
+        }
+        Command::Help => {
+            println!("Available commands: runMain, run [function], test [suite], help, exit");
+            Ok(false)
+        }
+        Command::Exit => Ok(true),
+    }
+}
+
+fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> Result<(), Error> {
+    let mut compiler = Compiler::new(&mut pool)?;
+    let sources = Files::from_dir(&config.source_dir, SourceFilter::None)?;
+    compiler.compile(&sources)?;
+
+    let mut vm = VM::new(&pool);
+    native::register_natives(&mut vm, |str| println!("{}", str));
+
+    let main = vm
+        .metadata()
+        .get_function(func_name)
+        .ok_or_else(|| Error::CompileError("No main function".to_owned(), Pos::ZERO))?;
+    let out = vm.call_with_callback(main, args!(), |res| res.map(|val| val.to_string(&pool)));
+    if let Some(res) = out {
+        println!("result: {}", res);
+    }
+    Ok(())
+}
+
+enum Command<'inp> {
+    RunMain,
+    Run(&'inp str),
+    Test(&'inp str),
+    Help,
+    Exit,
+}
+
+impl<'inp> Command<'inp> {
+    fn parse(input: &'inp str) -> Result<Self, &'static str> {
+        let parts = input.split(" ").collect::<Vec<_>>();
+        match parts.as_slice() {
+            ["runMain"] => Ok(Command::RunMain),
+            ["run", method] => Ok(Command::Run(method)),
+            ["test", suite] => Ok(Command::Test(suite)),
+            ["help"] => Ok(Command::Help),
+            ["exit"] => Ok(Command::Exit),
+            _ => Err("Invalid command, enter 'help' for more information"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShellConfig {
+    bundle_path: PathBuf,
+    #[serde(default = "ShellConfig::default_source_dir")]
+    source_dir: PathBuf,
+    #[serde(default = "ShellConfig::default_test_dir")]
+    test_dir: PathBuf,
+}
+
+impl ShellConfig {
+    pub fn load(path: &Path) -> Result<Self, Error> {
+        let contents = std::fs::read_to_string(path)?;
+        let res =
+            toml::from_str(&contents).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+        Ok(res)
+    }
+
+    fn default_source_dir() -> PathBuf {
+        "src".into()
+    }
+
+    fn default_test_dir() -> PathBuf {
+        "test".into()
+    }
+}

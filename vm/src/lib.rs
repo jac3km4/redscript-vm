@@ -601,14 +601,16 @@ impl<'pool> VM<'pool> {
         match frame.next_instr().unwrap() {
             Instr::Local(idx) => {
                 self.exec(frame);
-                self.with_local(idx, |local, mc, root| {
-                    *local = root.pop(mc).unwrap();
+                self.with_local(idx, |local, mc, root| match local {
+                    Value::Pinned(inner) => *inner.write(mc) = root.pop(mc).unwrap(),
+                    val => *val = root.pop(mc).unwrap(),
                 });
             }
             Instr::Param(idx) => {
                 self.exec(frame);
-                self.with_local(idx, |local, mc, root| {
-                    *local = root.pop(mc).unwrap();
+                self.with_local(idx, |local, mc, root| match local {
+                    Value::Pinned(inner) => *inner.write(mc) = root.pop(mc).unwrap(),
+                    val => *val = root.pop(mc).unwrap(),
                 });
             }
             Instr::ObjectField(idx) => {

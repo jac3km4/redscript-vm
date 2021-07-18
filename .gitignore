@@ -1,3 +1,5 @@
 /target
 .vscode/
 debug/
+redscript.toml
+redscript-history.txt

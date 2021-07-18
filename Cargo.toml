@@ -2,7 +2,8 @@ cargo-features = ["strip"]
 
 [workspace]
 members = [
-  "vm"
+  "vm",
+  "shell"
 ]
 
 [profile.release]

@@ -61,6 +61,11 @@ impl<'pool> Metadata<'pool> {
     }
 
     #[inline]
+    pub fn get_class(&self, name: &str) -> Option<PoolIndex<Class>> {
+        self.symbols.classes.get(&name.to_owned()).cloned()
+    }
+
+    #[inline]
     pub fn get_function(&self, name: &str) -> Option<PoolIndex<Function>> {
         self.symbols.functions.get(&name.to_owned()).cloned()
     }
