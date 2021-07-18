@@ -32,6 +32,8 @@ fn main() -> Result<(), Error> {
 }
 
 fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
+    println!("Welcome to the redscript shell! Type 'help' for more information.");
+
     let mut rl = Editor::<()>::new();
     if rl.load_history(HISTORY_FILE).is_err() {
         println!("No previous history");
