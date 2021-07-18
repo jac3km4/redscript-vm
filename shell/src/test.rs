@@ -66,8 +66,10 @@ fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<St
 }
 
 fn pretty_test_name(name: &str) -> String {
-    let mut str = String::new();
-    for c in name.chars() {
+    let chars = name.chars();
+    let mut str: String = chars.take(1).collect();
+
+    for c in name.chars().skip(1) {
         if c.is_ascii_uppercase() {
             str.push(' ');
             str.push(c.to_ascii_lowercase());

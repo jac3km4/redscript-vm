@@ -50,7 +50,7 @@ Crocodile poop used to be used as a contraception
 The shell comes with a basic test framework too.
 You can use it to test your mods against the game by defining some test suites, for instance a `test/myModSuite.reds`:
 ```swift
-public class MyModTestSuite {
+public class MyModSuite {
   public func SpawnVehicleFlagShouldBeTrue() {
     let system = new PreventionSystem();
     AssertEq(system.ShouldSpawnVehicle(), true);
@@ -59,6 +59,6 @@ public class MyModTestSuite {
 ```
 You can run your test suite with a shell command:
 ```
->> test MyModTestSuite
-+  spawn vehicle flag should be true
+>> test MyModSuite
++ Spawn vehicle flag should be true
 ```
