@@ -6,7 +6,7 @@ use redscript::ast::Pos;
 use redscript::bundle::{ConstantPool, ScriptBundle};
 use redscript::error::Error;
 use redscript_compiler::source_map::{Files, SourceFilter};
-use redscript_compiler::Compiler;
+use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -91,9 +91,8 @@ fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result
 }
 
 fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> Result<(), Error> {
-    let mut compiler = Compiler::new(&mut pool)?;
     let sources = Files::from_dir(&config.source_dir, SourceFilter::None)?;
-    compiler.compile(&sources)?;
+    CompilationUnit::new(&mut pool)?.compile(&sources)?;
 
     let mut vm = VM::new(&pool);
     native::register_natives(&mut vm, |str| println!("{}", str));

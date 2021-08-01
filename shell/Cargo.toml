@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "f56de11" }
-redscript-compiler = { git = "https://github.com/jac3km4/redscript.git", package = "redscript-compiler", rev = "f56de11" }
+redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "7510e97" }
+redscript-compiler = { git = "https://github.com/jac3km4/redscript.git", package = "redscript-compiler", rev = "7510e97" }
 redscript-vm = { path = "../vm" }
 rustyline = "8.2"
 colored = "2"

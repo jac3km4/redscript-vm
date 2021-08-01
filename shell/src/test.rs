@@ -8,14 +8,13 @@ use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::{Function, Visibility};
 use redscript::error::Error;
 use redscript_compiler::source_map::Files;
-use redscript_compiler::Compiler;
+use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};
 use walkdir::WalkDir;
 
 use crate::ShellConfig;
 
 pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> Result<(), Error> {
-    let mut compiler = Compiler::new(&mut pool)?;
     let sources = WalkDir::new(&config.source_dir).into_iter();
     let tests = WalkDir::new(&config.test_dir).into_iter();
     let all = sources
@@ -24,7 +23,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     let mut files = Files::from_files(all)?;
     files.add("stdlib.reds".into(), include_str!("test-stdlib.reds").to_owned());
 
-    compiler.compile(&files)?;
+    CompilationUnit::new(&mut pool)?.compile(&files)?;
 
     let mut vm = VM::new(&pool);
 
