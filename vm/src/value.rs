@@ -179,6 +179,12 @@ impl VMIndex {
     }
 }
 
+impl<A> From<PoolIndex<A>> for VMIndex {
+    fn from(idx: PoolIndex<A>) -> Self {
+        VMIndex(idx.into())
+    }
+}
+
 #[derive(Debug, Collect)]
 #[collect(no_drop)]
 pub struct Instance<'gc> {
@@ -203,7 +209,7 @@ impl<'gc> Instance<'gc> {
         let vtable = meta.get_vtable(idx).unwrap();
 
         Self {
-            tag: VMIndex(idx.index),
+            tag: idx.into(),
             fields,
             vtable,
         }

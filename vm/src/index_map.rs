@@ -26,17 +26,20 @@ impl<V> IndexMap<V> {
 
     #[inline(always)]
     pub fn get_mut<A>(&mut self, idx: PoolIndex<A>) -> Option<&mut V> {
-        self.values.get_mut(idx.index as u64)
+        let idx: u32 = idx.into();
+        self.values.get_mut(idx.into())
     }
 
     #[inline(always)]
     pub fn get<A>(&self, idx: PoolIndex<A>) -> Option<&V> {
-        self.values.get(idx.index as u64)
+        let idx: u32 = idx.into();
+        self.values.get(idx.into())
     }
 
     #[inline(always)]
     pub fn put<A>(&mut self, idx: PoolIndex<A>, val: V) {
-        self.values.insert(idx.index as u64, val);
+        let idx: u32 = idx.into();
+        self.values.insert(idx.into(), val);
     }
 }
 
@@ -48,7 +51,13 @@ impl<V> Default for IndexMap<V> {
 
 impl<A, V> FromIterator<(PoolIndex<A>, V)> for IndexMap<V> {
     fn from_iter<I: IntoIterator<Item = (PoolIndex<A>, V)>>(iter: I) -> Self {
-        let values = iter.into_iter().map(|(k, v)| (k.index as u64, v)).collect();
+        let values = iter
+            .into_iter()
+            .map(|(k, v)| {
+                let k: u32 = k.into();
+                (k.into(), v)
+            })
+            .collect();
         Self { values }
     }
 }

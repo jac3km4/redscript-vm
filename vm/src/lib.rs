@@ -11,7 +11,7 @@ use redscript::bytecode::{Instr, Location, Offset};
 use redscript::definition::{Function, Parameter};
 use value::Value;
 
-use crate::value::{Instance, Obj, StringType, VMIndex};
+use crate::value::{Instance, Obj, StringType};
 
 mod array;
 mod index_map;
@@ -149,7 +149,7 @@ impl<'pool> VM<'pool> {
                 self.push(|_| Value::F64(val));
             }
             Instr::NameConst(idx) => {
-                self.push(|_| Value::InternStr(StringType::Name, VMIndex(idx.index)));
+                self.push(|_| Value::InternStr(StringType::Name, idx.into()));
             }
             Instr::EnumConst(_, member) => {
                 let val = self.metadata.pool().enum_value(member).expect("Enum member not found");
@@ -159,10 +159,10 @@ impl<'pool> VM<'pool> {
                 self.push(|mc| Value::Str(Gc::allocate(mc, str)));
             }
             Instr::TweakDbIdConst(idx) => {
-                self.push(|_| Value::InternStr(StringType::TweakDbId, VMIndex(idx.index)));
+                self.push(|_| Value::InternStr(StringType::TweakDbId, idx.into()));
             }
             Instr::ResourceConst(idx) => {
-                self.push(|_| Value::InternStr(StringType::Resource, VMIndex(idx.index)));
+                self.push(|_| Value::InternStr(StringType::Resource, idx.into()));
             }
             Instr::TrueConst => {
                 self.push(|_| Value::Bool(true));

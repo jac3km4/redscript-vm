@@ -172,7 +172,7 @@ impl ClassMetadata {
                         let def = pool.definition(*fun_idx).ok()?;
                         let fun = pool.function(*fun_idx).ok()?;
                         if !fun.flags.is_final() && !fun.flags.is_static() {
-                            vtable.put(def.name, VMIndex(fun_idx.index as u32));
+                            vtable.put(def.name, (*fun_idx).into());
                         }
                     }
                 }

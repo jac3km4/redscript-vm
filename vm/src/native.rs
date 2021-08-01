@@ -12,7 +12,7 @@ pub fn default_pool() -> ConstantPool {
 
     let mut register_prim = |str: &str| {
         let idx = pool.names.add(Rc::new(str.to_owned()));
-        pool.add_definition(Definition::type_(idx, Type::Prim));
+        pool.add_definition::<Type>(Definition::type_(idx, Type::Prim));
     };
 
     register_prim("");
