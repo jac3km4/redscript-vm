@@ -1,7 +1,8 @@
 [package]
 name = "redscript-sh"
-version = "0.1.0"
+version = "0.0.3-dev"
 edition = "2018"
+publish = false
 
 [dependencies]
 redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "v0.3.0" }
@@ -12,3 +13,6 @@ colored = "2"
 walkdir = "2.3"
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"
+
+[package.metadata.release]
+disable-tag = true

@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "redscript-sh"
-version = "0.1.0"
+version = "0.0.3-dev"
 dependencies = [
  "colored",
  "redscript",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "redscript-vm"
-version = "0.1.0"
+version = "0.0.3-dev"
 dependencies = [
  "casey",
  "enum-as-inner",
