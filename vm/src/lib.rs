@@ -156,7 +156,7 @@ impl<'pool> VM<'pool> {
                 self.push(|_| Value::EnumVal(val));
             }
             Instr::StringConst(str) => {
-                self.push(|mc| Value::Str(Gc::allocate(mc, str)));
+                self.push(|_| Value::InternStr(StringType::String, str.into()));
             }
             Instr::TweakDbIdConst(idx) => {
                 self.push(|_| Value::InternStr(StringType::TweakDbId, idx.into()));
@@ -277,10 +277,10 @@ impl<'pool> VM<'pool> {
                     stack.push(Value::BoxedStruct(GcCell::allocate(mc, data)))
                 });
             }
-            Instr::InvokeStatic(_, _, idx) => {
+            Instr::InvokeStatic(_, _, idx, _) => {
                 self.call_static(idx, frame);
             }
-            Instr::InvokeVirtual(_, _, name) => {
+            Instr::InvokeVirtual(_, _, name, _) => {
                 let tag = self
                     .arena
                     .mutate(|_, root| root.contexts.read().last().unwrap().as_instance().unwrap().read().tag);
@@ -469,8 +469,14 @@ impl<'pool> VM<'pool> {
             Instr::WeakRefNull => {
                 self.push(|_| Value::Obj(Obj::Null));
             }
-            Instr::AsRef(_) => todo!(),
-            Instr::Deref(_) => todo!(),
+            Instr::AsRef(_) => {
+                self.exec(frame);
+                self.unop(|val, mc| Value::Pinned(GcCell::allocate(mc, val)));
+            }
+            Instr::Deref(_) => {
+                self.exec(frame);
+                self.unop(|val, _| val.unpinned());
+            }
         };
         Action::Continue
     }

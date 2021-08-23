@@ -7,7 +7,7 @@ edition = "2018"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "7510e97" }
+redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "v0.3.0" }
 gc-arena = "0.2"
 intmap = "0.7"
 casey = "0.3"

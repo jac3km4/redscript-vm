@@ -92,7 +92,7 @@ impl<'gc> Value<'gc> {
             Value::BoxedStruct(_) => todo!(),
             Value::Obj(_) => todo!(),
             Value::Str(str) => str.deref().to_owned(),
-            Value::InternStr(StringType::String, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
+            Value::InternStr(StringType::String, idx) => pool.strings.get(idx.to_pool()).unwrap().deref().to_owned(),
             Value::InternStr(StringType::Name, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
             Value::InternStr(StringType::TweakDbId, idx) => {
                 pool.tweakdb_ids.get(idx.to_pool()).unwrap().deref().to_owned()
@@ -257,9 +257,14 @@ impl_prim_conversions!(f64, F64);
 impl_prim_conversions!(bool, Bool);
 
 impl<'gc> FromVM<'gc> for String {
-    fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
+    fn from_vm<'pool>(val: Value<'gc>, pool: &'pool ConstantPool) -> Result<Self, &'static str> {
         match val.unpinned() {
             Value::Str(i) => Ok(i.deref().clone()),
+            Value::InternStr(StringType::String, idx) => pool
+                .strings
+                .get(idx.to_pool())
+                .map(|rc| rc.to_string())
+                .map_err(|_| "Unknown string constant"),
             _ => Err("Invalid argument, expected String"),
         }
     }
