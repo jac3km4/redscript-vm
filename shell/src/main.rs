@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use redscript::ast::Pos;
+use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, ScriptBundle};
 use redscript::error::Error;
 use redscript_compiler::source_map::{Files, SourceFilter};
@@ -92,7 +92,7 @@ fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result
 
 fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> Result<(), Error> {
     let sources = Files::from_dir(&config.source_dir, SourceFilter::None)?;
-    CompilationUnit::new(&mut pool)?.compile(&sources)?;
+    CompilationUnit::new(&mut pool)?.compile_files(&sources)?;
 
     let mut vm = VM::new(&pool);
     native::register_natives(&mut vm, |str| println!("{}", str));
@@ -100,7 +100,7 @@ fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -
     let main = vm
         .metadata()
         .get_function(func_name)
-        .ok_or_else(|| Error::CompileError("No main function".to_owned(), Pos::ZERO))?;
+        .ok_or_else(|| Error::CompileError("No main function".to_owned(), Span::ZERO))?;
     let out = vm.call_with_callback(main, args!(), |res| res.map(|val| val.to_string(&pool)));
     if let Some(res) = out {
         println!("result: {}", res);

@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "v0.3.0" }
+redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "29b744d" }
 gc-arena = "0.2"
 intmap = "0.7"
 casey = "0.3"

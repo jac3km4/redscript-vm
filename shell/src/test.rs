@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::rc::Rc;
 
 use colored::*;
-use redscript::ast::Pos;
+use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::{Function, Visibility};
 use redscript::error::Error;
@@ -23,7 +23,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     let mut files = Files::from_files(all)?;
     files.add("stdlib.reds".into(), include_str!("test-stdlib.reds").to_owned());
 
-    CompilationUnit::new(&mut pool)?.compile(&files)?;
+    CompilationUnit::new(&mut pool)?.compile_files(&files)?;
 
     let mut vm = VM::new(&pool);
 
@@ -34,7 +34,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     let class_idx = vm
         .metadata()
         .get_class(suite)
-        .ok_or_else(|| Error::CompileError("Test suite not defined".to_owned(), Pos::ZERO))?;
+        .ok_or_else(|| Error::CompileError("Test suite not defined".to_owned(), Span::ZERO))?;
     let class = vm.metadata().pool().class(class_idx)?;
 
     for fun_idx in &class.functions {
