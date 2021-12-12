@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, ScriptBundle};
-use redscript::error::Error;
+use redscript_compiler::error::Error;
 use redscript_compiler::source_map::{Files, SourceFilter};
 use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};

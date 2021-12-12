@@ -459,10 +459,10 @@ impl<'pool> VM<'pool> {
                 self.exec(frame);
                 self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) })
             }
-            Instr::VariantIsValid => todo!(),
+            Instr::VariantIsDefined => todo!(),
             Instr::VariantIsRef => todo!(),
             Instr::VariantIsArray => todo!(),
-            Instr::VatiantToCName => todo!(),
+            Instr::VariantTypeName => todo!(),
             Instr::VariantToString => todo!(),
             Instr::WeakRefToRef => {}
             Instr::RefToWeakRef => {}
@@ -570,7 +570,7 @@ impl<'pool> VM<'pool> {
 
     fn call_native(&mut self, idx: PoolIndex<Function>) {
         let call = self.metadata.get_native(idx).unwrap_or_else(|| {
-            let name = self.metadata.pool().definition_name(idx).unwrap();
+            let name = self.metadata.pool().def_name(idx).unwrap();
             panic!("Native {} is not defined", name)
         });
         let pool = self.metadata.pool();

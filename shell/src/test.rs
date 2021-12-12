@@ -6,7 +6,7 @@ use colored::*;
 use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::{Function, Visibility};
-use redscript::error::Error;
+use redscript_compiler::error::Error;
 use redscript_compiler::source_map::Files;
 use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};
@@ -49,7 +49,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
 fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> Result<(), Error> {
     vm.call_void(fun_idx, args!());
 
-    let name = vm.metadata().pool().definition_name(fun_idx)?;
+    let name = vm.metadata().pool().def_name(fun_idx)?;
     let pretty_name = pretty_test_name(&name);
     let mut errors = errors.borrow_mut();
     if errors.is_empty() {

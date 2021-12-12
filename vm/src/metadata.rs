@@ -297,7 +297,7 @@ impl TypeId {
         let typ = pool.type_(idx).ok()?;
         match typ {
             Type::Prim => {
-                let name = pool.definition_name(idx).ok()?;
+                let name = pool.def_name(idx).ok()?;
                 let res = match name.as_str() {
                     "Int64" => TypeId::I64,
                     "Int32" => TypeId::I32,
@@ -325,7 +325,7 @@ impl TypeId {
                 Some(res)
             }
             Type::Class => {
-                let name = pool.definition_name(idx).ok()?;
+                let name = pool.def_name(idx).ok()?;
                 symbols
                     .classes
                     .get(&name)
@@ -333,12 +333,12 @@ impl TypeId {
                     .or_else(|| symbols.enums.get(&name).map(|idx| TypeId::Enum(*idx)))
             }
             Type::Ref(typ) => {
-                let name = pool.definition_name(*typ).ok()?;
+                let name = pool.def_name(*typ).ok()?;
                 let class = symbols.classes.get(&name)?;
                 Some(TypeId::Ref(*class))
             }
             Type::WeakRef(typ) => {
-                let name = pool.definition_name(*typ).ok()?;
+                let name = pool.def_name(*typ).ok()?;
                 let class = symbols.classes.get(&name)?;
                 Some(TypeId::WRef(*class))
             }
