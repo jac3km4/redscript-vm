@@ -14,7 +14,7 @@ use serde::Deserialize;
 
 mod test;
 
-const HISTORY_FILE: &'static str = "redscript-history.txt";
+const HISTORY_FILE: &str = "redscript-history.txt";
 
 fn main() -> Result<(), Error> {
     let location = std::env::current_dir()?.join("redscript.toml");
@@ -92,7 +92,7 @@ fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result
 
 fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> Result<(), Error> {
     let sources = Files::from_dir(&config.source_dir, SourceFilter::None)?;
-    CompilationUnit::new(&mut pool)?.compile_files(&sources)?;
+    CompilationUnit::new_with_defaults(&mut pool)?.compile_files(&sources)?;
 
     let mut vm = VM::new(&pool);
     native::register_natives(&mut vm, |str| println!("{}", str));
@@ -118,7 +118,7 @@ enum Command<'inp> {
 
 impl<'inp> Command<'inp> {
     fn parse(input: &'inp str) -> Result<Self, &'static str> {
-        let parts = input.split(" ").collect::<Vec<_>>();
+        let parts = input.split(' ').collect::<Vec<_>>();
         match parts.as_slice() {
             ["runMain"] => Ok(Command::RunMain),
             ["run", method] => Ok(Command::Run(method)),

@@ -161,7 +161,7 @@ pub fn register_natives(vm: &mut VM, on_log: impl Fn(String) + 'static) {
     );
 
     meta.register_native(
-        "OperatorAdd;StringString;String",
+        "OperatorAdd;Script_RefStringScript_RefString;String",
         |x: String, y: String| Ret(x + &y)
     );
 

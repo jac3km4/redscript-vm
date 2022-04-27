@@ -149,6 +149,7 @@ impl Symbols {
     }
 }
 
+#[derive(Debug, Default)]
 struct ClassMetadata {
     vtable: Option<Rc<IndexMap<VMIndex>>>,
 }
@@ -184,12 +185,7 @@ impl ClassMetadata {
     }
 }
 
-impl Default for ClassMetadata {
-    fn default() -> Self {
-        Self { vtable: None }
-    }
-}
-
+#[derive(Default)]
 struct FunctionMetadata {
     offsets: Option<Rc<Vec<u16>>>,
     native: Option<Box<VMFunction>>,
@@ -211,15 +207,6 @@ impl FunctionMetadata {
                 self.offsets = Some(rc.clone());
                 rc
             }
-        }
-    }
-}
-
-impl Default for FunctionMetadata {
-    fn default() -> Self {
-        Self {
-            offsets: None,
-            native: None,
         }
     }
 }

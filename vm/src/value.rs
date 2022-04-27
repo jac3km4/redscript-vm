@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use enum_as_inner::EnumAsInner;
 use gc_arena::{Collect, Gc, GcCell, MutationContext};
+use itertools::Itertools;
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::Class;
 
@@ -100,7 +101,11 @@ impl<'gc> Value<'gc> {
             Value::InternStr(StringType::Resource, idx) => {
                 pool.resources.get(idx.to_pool()).unwrap().deref().to_owned()
             }
-            Value::Array(_) => todo!(),
+            Value::Array(val) => {
+                let val = val.read();
+                let cnts = val.iter().map(|val| val.to_string(pool)).format(", ");
+                format!("[{cnts}]")
+            }
             Value::Pinned(v) => v.read().to_string(pool),
         }
     }

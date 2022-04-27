@@ -23,7 +23,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     let mut files = Files::from_files(all)?;
     files.add("stdlib.reds".into(), include_str!("test-stdlib.reds").to_owned());
 
-    CompilationUnit::new(&mut pool)?.compile_files(&files)?;
+    CompilationUnit::new_with_defaults(&mut pool)?.compile_files(&files)?;
 
     let mut vm = VM::new(&pool);
 
@@ -92,10 +92,9 @@ fn register_test_natives(vm: &mut VM, errors: Rc<RefCell<Vec<String>>>) {
         let msg = format!("{} is equal to {}", a, b);
         copy.borrow_mut().push(msg);
     });
-    let copy = errors.clone();
     meta.register_native("Assert", move |res: bool| {
         if !res {
-            copy.borrow_mut().push("Assertion failed".to_owned());
+            errors.borrow_mut().push("Assertion failed".to_owned());
         }
     });
 }
