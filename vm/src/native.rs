@@ -172,6 +172,11 @@ pub fn register_natives(vm: &mut VM, on_log: impl Fn(String) + 'static) {
         |x: bool, y: bool| Ret(x || y)
     );
 
+    meta.register_native(
+        "StrChar",
+        |x: i32| Ret(String::from(char::from_u32(x as _).unwrap_or_default()))
+    );
+
     impl_arithmetic!(meta, Int8);
     impl_arithmetic!(meta, Int16);
     impl_arithmetic!(meta, Int32);
