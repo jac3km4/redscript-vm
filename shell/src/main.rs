@@ -99,8 +99,8 @@ fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -
     let main = vm
         .metadata()
         .get_function(func_name)
-        .ok_or_else(|| anyhow::anyhow!("No main function"))?;
-    let out = vm.call_with_callback(main, args!(), |res| res.map(|val| val.to_string(&pool)));
+        .ok_or_else(|| anyhow::anyhow!("no main function"))?;
+    let out = vm.call_with_callback(main, args!(), |res| res.map(|val| val.to_string(&pool)))?;
     if let Some(res) = out {
         println!("result: {}", res);
     }

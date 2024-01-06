@@ -32,7 +32,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> a
     let class_idx = vm
         .metadata()
         .get_class(suite)
-        .ok_or_else(|| anyhow::anyhow!("Test suite not defined"))?;
+        .ok_or_else(|| anyhow::anyhow!("test suite not defined"))?;
     let class = vm.metadata().pool().class(class_idx)?;
 
     for fun_idx in &class.functions {
@@ -45,7 +45,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> a
 }
 
 fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> anyhow::Result<()> {
-    vm.call_void(fun_idx, args!());
+    vm.call_void(fun_idx, args!())?;
 
     let name = vm.metadata().pool().def_name(fun_idx)?;
     let pretty_name = pretty_test_name(&name);

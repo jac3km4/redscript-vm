@@ -29,7 +29,8 @@ impl<'pool> Metadata<'pool> {
         for (idx, def) in pool.definitions() {
             match def.value {
                 AnyDefinition::Type(_) => {
-                    types.put(idx, TypeId::from(idx.cast(), pool, &symbols).unwrap());
+                    let id = TypeId::from(idx.cast(), pool, &symbols).expect("should resolve types");
+                    types.put(idx, id);
                 }
                 AnyDefinition::Function(_) => {
                     function_meta.put(idx, FunctionMetadata::default());
@@ -104,7 +105,7 @@ impl<'pool> Metadata<'pool> {
     pub fn is_instance_of(&self, instance: PoolIndex<Class>, of: PoolIndex<Class>) -> bool {
         let mut expected = of;
         loop {
-            let class = self.pool.class(expected).unwrap();
+            let class = self.pool.class(expected).expect("should resolve classes");
             if instance == expected {
                 break true;
             } else if class.base.is_undefined() {
@@ -200,10 +201,12 @@ impl FunctionMetadata {
             None => {
                 let code = &function.code.0;
                 let mut offsets = Vec::with_capacity(code.len());
-                offsets.push(0);
+                let mut current = 0;
+                offsets.push(current);
 
                 for i in &code[..code.len() - 1] {
-                    offsets.push(offsets.last().unwrap() + i.size());
+                    current += i.size();
+                    offsets.push(current);
                 }
                 let rc = Rc::new(offsets);
                 self.offsets = Some(rc.clone());
@@ -268,11 +271,11 @@ impl TypeId {
             TypeId::ScriptRef(_) => todo!(),
             TypeId::Enum(_) => Value::EnumVal(0),
             TypeId::Struct(class_idx) => {
-                let class = meta.pool().class(*class_idx).unwrap();
+                let class = meta.pool().class(*class_idx).expect("should resolve classes");
                 let fields = class.fields.iter().copied();
                 let values = fields.clone().map(|field_idx| {
-                    let field = meta.pool().field(field_idx).unwrap();
-                    let typ = meta.get_type(field.type_).unwrap();
+                    let field = meta.pool().field(field_idx).expect("should resolve fields");
+                    let typ = meta.get_type(field.type_).expect("should resolve types");
                     typ.default_value(mc, meta)
                 });
                 Value::BoxedStruct(Gc::new(mc, RefLock::new(fields.zip(values).collect())))
@@ -309,7 +312,7 @@ impl TypeId {
                     "CRUIDRef" => TypeId::CRUID,
                     "redResourceReferenceScriptToken" => TypeId::String,
                     "ResRef" => TypeId::ResRef,
-                    _ => panic!("Unknown primitive: {}", name),
+                    _ => return None,
                 };
                 Some(res)
             }

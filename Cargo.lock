@@ -469,6 +469,7 @@ dependencies = [
  "log",
  "rand",
  "redscript",
+ "thiserror",
 ]
 
 [[package]]

@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::usize;
 
+use error::{RuntimeError, RuntimeResult};
 use gc_arena::lock::{GcRefLock, RefLock};
 use gc_arena::{Arena, Collect, Gc, Mutation, Rootable};
 use index_map::IndexMap;
@@ -15,6 +16,7 @@ use value::Value;
 use crate::value::{Instance, Obj, StringType};
 
 mod array;
+pub mod error;
 mod index_map;
 pub mod interop;
 pub mod metadata;
@@ -87,26 +89,26 @@ impl<'pool> VM<'pool> {
         self.arena.mutate(|mc, root| root.adjust_stack(size, mc))
     }
 
-    fn run(&mut self, frame: &mut Frame) -> bool {
+    fn run(&mut self, frame: &mut Frame) -> Result<bool, RuntimeError> {
         loop {
-            match self.exec(frame) {
+            match self.exec(frame)? {
                 Action::Continue => {}
-                Action::Exit => return false,
-                Action::Return => return true,
+                Action::Exit => return Ok(false),
+                Action::Return => return Ok(true),
             }
         }
     }
 
     #[inline]
-    fn exec(&mut self, frame: &mut Frame) -> Action {
+    fn exec(&mut self, frame: &mut Frame) -> RuntimeResult<Action> {
         self.exec_with(frame, false)
     }
 
-    fn exec_with(&mut self, frame: &mut Frame, pin: bool) -> Action {
+    fn exec_with(&mut self, frame: &mut Frame, pin: bool) -> RuntimeResult<Action> {
         let location = frame.location();
         let instr = match frame.next_instr() {
             Some(i) => i,
-            None => return Action::Exit,
+            None => return Ok(Action::Exit),
         };
         match instr {
             Instr::Nop => {}
@@ -173,7 +175,7 @@ impl<'pool> VM<'pool> {
             }
             Instr::Breakpoint(_) => todo!(),
             Instr::Assign => {
-                self.assignment(frame);
+                self.assignment(frame)?;
             }
             Instr::Target(_) => todo!(),
             Instr::Local(idx) => {
@@ -195,17 +197,21 @@ impl<'pool> VM<'pool> {
             Instr::ObjectField(idx) => {
                 self.arena.mutate(|mc, root| {
                     let contexts = root.contexts.borrow_mut(mc);
-                    let context = contexts.last().unwrap().as_instance().unwrap();
+                    let context = contexts
+                        .last()
+                        .and_then(Obj::as_instance)
+                        .ok_or(RuntimeError::NullPointer)?;
                     let mut context = context.borrow_mut(mc);
                     let val = context.fields.get_mut(idx).unwrap();
                     if pin {
                         val.pin(mc);
                     }
-                    root.push(val.copied(mc), mc)
-                });
+                    root.push(val.copied(mc), mc);
+                    Ok(())
+                })?;
             }
             Instr::StructField(idx) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, mc| match &*val.unpinned() {
                     Value::BoxedStruct(cell) => {
                         let mut val = cell.borrow_mut(mc);
@@ -216,19 +222,19 @@ impl<'pool> VM<'pool> {
                         val.copied(mc)
                     }
                     Value::PackedStruct(_) => todo!(),
-                    _ => panic!("Not a struct"),
+                    _ => panic!("invalid bytecode"),
                 });
             }
             Instr::ExternalVar => todo!(),
             Instr::Switch(_, _) => {
                 let sp = self.arena.mutate(|_, root| root.stack.borrow().len());
-                self.exec(frame);
+                self.exec(frame)?;
                 let mut pos = frame.location().unwrap();
                 while let Some(Instr::SwitchLabel(next, body)) = frame.current_instr() {
                     frame.next_instr();
 
                     self.copy(sp);
-                    self.exec(frame);
+                    self.exec(frame)?;
                     self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(&rhs)));
 
                     let equal = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
@@ -247,7 +253,7 @@ impl<'pool> VM<'pool> {
                 frame.seek(offset.absolute(location.unwrap()));
             }
             Instr::JumpIfFalse(offset) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 let cond: bool = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
                 if !cond {
                     frame.seek(offset.absolute(location.unwrap()));
@@ -255,17 +261,17 @@ impl<'pool> VM<'pool> {
             }
             Instr::Skip(_) => todo!(),
             Instr::Conditional(when_false, exit) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 let cond: bool = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
                 if !cond {
                     frame.seek(when_false.absolute(location.unwrap()));
                 }
-                self.exec(frame);
+                self.exec(frame)?;
                 frame.seek(exit.absolute(location.unwrap()));
             }
             Instr::Construct(args, class_idx) => {
                 for _ in 0..args {
-                    self.exec(frame);
+                    self.exec(frame)?;
                 }
                 let class = self.metadata.pool().class(class_idx).unwrap();
                 let fields = class.fields.iter();
@@ -279,49 +285,49 @@ impl<'pool> VM<'pool> {
                 });
             }
             Instr::InvokeStatic(_, _, idx, _) => {
-                self.call_static(idx, frame);
+                self.call_static(idx, frame)?;
             }
             Instr::InvokeVirtual(_, _, name, _) => {
                 let tag = self.arena.mutate(|_, root| {
                     let ctx = root.contexts.borrow();
-                    let inst = ctx.last().unwrap().as_instance().unwrap();
-                    inst.borrow().tag
-                });
+                    let inst = ctx.last().and_then(Obj::as_instance).ok_or(RuntimeError::NullPointer)?;
+                    Ok(inst.borrow().tag)
+                })?;
                 let vtable = self.metadata.get_vtable(tag.to_pool()).unwrap();
                 let idx = vtable.get(name).unwrap().to_pool();
-                self.call_static(idx, frame);
+                self.call_static(idx, frame)?;
             }
             Instr::ParamEnd => {}
             Instr::Return => {
                 if !matches!(frame.current_instr(), Some(Instr::Nop)) {
-                    self.exec(frame);
-                    return Action::Return;
+                    self.exec(frame)?;
+                    return Ok(Action::Return);
                 } else {
-                    return Action::Exit;
+                    return Ok(Action::Exit);
                 }
             }
             Instr::Context(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.arena.mutate(|mc, root| {
                     let val = root.pop(mc).unwrap();
                     let val = val.unpinned();
                     let obj = val.as_obj().unwrap();
                     root.contexts.borrow_mut(mc).push(obj.clone());
                 });
-                self.exec(frame);
+                self.exec(frame)?;
                 self.arena.mutate(|mc, root| {
                     root.contexts.borrow_mut(mc).pop();
                 });
             }
             Instr::Equals(_) => {
-                self.exec(frame);
-                self.exec(frame);
+                self.exec(frame)?;
+                self.exec(frame)?;
                 self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(&rhs)));
             }
             Instr::RefStringEqualsString(_) | Instr::StringEqualsRefString(_) => todo!(),
             Instr::NotEquals(_) => {
-                self.exec(frame);
-                self.exec(frame);
+                self.exec(frame)?;
+                self.exec(frame)?;
                 self.binop(|lhs, rhs, _| Value::Bool(!lhs.equals(&rhs)));
             }
             Instr::RefStringNotEqualsString(_) | Instr::StringNotEqualsRefString(_) => todo!(),
@@ -340,67 +346,67 @@ impl<'pool> VM<'pool> {
             }
             Instr::StartProfiling(_) => todo!(),
             Instr::ArrayClear(_) => {
-                array::clear(self, frame);
+                array::clear(self, frame)?;
             }
             Instr::ArraySize(_) => {
-                array::size(self, frame);
+                array::size(self, frame)?;
             }
             Instr::ArrayResize(_) => {
-                array::resize(self, frame);
+                array::resize(self, frame)?;
             }
             Instr::ArrayFindFirst(_) => {
-                array::find_first(self, frame);
+                array::find_first(self, frame)?;
             }
             Instr::ArrayFindFirstFast(_) => {
-                array::find_first(self, frame);
+                array::find_first(self, frame)?;
             }
             Instr::ArrayFindLast(_) => {
-                array::find_last(self, frame);
+                array::find_last(self, frame)?;
             }
             Instr::ArrayFindLastFast(_) => {
-                array::find_last(self, frame);
+                array::find_last(self, frame)?;
             }
             Instr::ArrayContains(_) => {
-                array::contains(self, frame);
+                array::contains(self, frame)?;
             }
             Instr::ArrayContainsFast(_) => {
-                array::contains(self, frame);
+                array::contains(self, frame)?;
             }
             Instr::ArrayCount(_) => {
-                array::count(self, frame);
+                array::count(self, frame)?;
             }
             Instr::ArrayCountFast(_) => {
-                array::count(self, frame);
+                array::count(self, frame)?;
             }
             Instr::ArrayPush(_) => {
-                array::push(self, frame);
+                array::push(self, frame)?;
             }
             Instr::ArrayPop(_) => {
-                array::pop(self, frame);
+                array::pop(self, frame)?;
             }
             Instr::ArrayInsert(_) => {
-                array::insert(self, frame);
+                array::insert(self, frame)?;
             }
             Instr::ArrayRemove(_) => {
-                array::remove(self, frame);
+                array::remove(self, frame)?;
             }
             Instr::ArrayRemoveFast(_) => {
-                array::remove(self, frame);
+                array::remove(self, frame)?;
             }
             Instr::ArrayGrow(_) => {
-                array::resize(self, frame);
+                array::resize(self, frame)?;
             }
             Instr::ArrayErase(_) => {
-                array::erase(self, frame);
+                array::erase(self, frame)?;
             }
             Instr::ArrayEraseFast(_) => {
-                array::erase(self, frame);
+                array::erase(self, frame)?;
             }
             Instr::ArrayLast(_) => {
-                array::last(self, frame);
+                array::last(self, frame)?;
             }
             Instr::ArrayElement(_) => {
-                array::element(self, frame);
+                array::element(self, frame)?;
             }
             Instr::ArraySort(_) | Instr::ArraySortByPredicate(_) => todo!(),
             Instr::StaticArraySize(_) => todo!(),
@@ -415,29 +421,29 @@ impl<'pool> VM<'pool> {
             Instr::StaticArrayLast(_) => todo!(),
             Instr::StaticArrayElement(_) => todo!(),
             Instr::RefToBool => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
                 })
             }
             Instr::WeakRefToBool => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
                 })
             }
             Instr::EnumToI32(_, _) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| Value::I32(*val.unpinned().as_enum_val().unwrap() as i32))
             }
             Instr::I32ToEnum(_, _) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| Value::EnumVal((*val.unpinned().as_i32().unwrap()).into()))
             }
             Instr::DynamicCast(expected, _) => {
-                self.exec(frame);
+                self.exec(frame)?;
 
                 let meta = &self.metadata;
                 self.arena.mutate(|mc, root| {
@@ -445,26 +451,32 @@ impl<'pool> VM<'pool> {
                     let val = stack.pop().unwrap();
                     let val = val.unpinned();
                     let obj = val.as_obj().unwrap();
-                    let tag = obj.as_instance().unwrap().borrow().tag.to_pool();
+                    let tag = obj
+                        .as_instance()
+                        .ok_or(RuntimeError::NullPointer)?
+                        .borrow()
+                        .tag
+                        .to_pool();
                     let obj = if meta.is_instance_of(tag, expected) {
                         obj.clone()
                     } else {
                         Obj::Null
                     };
-                    stack.push(Value::Obj(obj))
-                });
+                    stack.push(Value::Obj(obj));
+                    Ok(())
+                })?;
             }
             Instr::ToString(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 let pool = self.metadata.pool();
                 self.unop(|val, mc| Value::Str(Gc::new(mc, val.to_string(pool).into_boxed_str())));
             }
             Instr::ToVariant(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
             }
             Instr::FromVariant(typ) => {
                 let typ = self.metadata.get_type(typ).unwrap().clone();
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) })
             }
             Instr::VariantIsDefined => todo!(),
@@ -478,19 +490,19 @@ impl<'pool> VM<'pool> {
                 self.push(|_| Value::Obj(Obj::Null));
             }
             Instr::AsRef(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, mc| Value::Pinned(Gc::new(mc, RefLock::new(val))));
             }
             Instr::Deref(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.unop(|val, _| val.unpinned().clone());
             }
         };
-        Action::Continue
+        Ok(Action::Continue)
     }
 
     #[inline]
-    pub fn call<F, A>(&mut self, idx: PoolIndex<Function>, args: F) -> A
+    pub fn call<F, A>(&mut self, idx: PoolIndex<Function>, args: F) -> RuntimeResult<A>
     where
         F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
         A: for<'gc> FromVM<'gc>,
@@ -500,16 +512,16 @@ impl<'pool> VM<'pool> {
     }
 
     #[inline]
-    pub fn call_with_callback<F, C, A>(&mut self, idx: PoolIndex<Function>, args: F, cb: C) -> A
+    pub fn call_with_callback<F, C, A>(&mut self, idx: PoolIndex<Function>, args: F, cb: C) -> RuntimeResult<A>
     where
         F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
         C: for<'gc> Fn(Option<Value<'gc>>) -> A,
     {
-        self.call_void(idx, args);
-        self.arena.mutate(|mc, root| cb(root.pop(mc)))
+        self.call_void(idx, args)?;
+        Ok(self.arena.mutate(|mc, root| cb(root.pop(mc))))
     }
 
-    pub fn call_void<F>(&mut self, idx: PoolIndex<Function>, args: F)
+    pub fn call_void<F>(&mut self, idx: PoolIndex<Function>, args: F) -> RuntimeResult<()>
     where
         F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
     {
@@ -517,16 +529,17 @@ impl<'pool> VM<'pool> {
         self.arena.mutate(|mc, root| {
             let args = args(mc);
             if args.len() != function.parameters.len() {
-                panic!("Invalid number of parameters")
+                return Err(RuntimeError::InvalidInteropParameters);
             }
             for arg in args {
                 root.push(arg, mc);
             }
-        });
-        self.call_with_params(idx, &function.parameters);
+            Ok(())
+        })?;
+        self.call_with_params(idx, &function.parameters)
     }
 
-    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame) {
+    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame) -> RuntimeResult<()> {
         let function = self.metadata.pool().function(idx).unwrap();
         let mut indexes = Vec::with_capacity(function.parameters.len());
 
@@ -535,20 +548,20 @@ impl<'pool> VM<'pool> {
             if !matches!(frame.current_instr(), Some(Instr::Nop)) {
                 indexes.push(*param_idx);
             }
-            self.exec_with(frame, param.flags.is_out());
+            self.exec_with(frame, param.flags.is_out())?;
         }
         if matches!(frame.current_instr(), Some(Instr::ParamEnd)) {
             frame.skip(1);
         }
-        self.call_with_params(idx, &indexes);
+        self.call_with_params(idx, &indexes)
     }
 
-    fn call_with_params(&mut self, idx: PoolIndex<Function>, params: &[PoolIndex<Parameter>]) {
+    fn call_with_params(&mut self, idx: PoolIndex<Function>, params: &[PoolIndex<Parameter>]) -> RuntimeResult<()> {
         let function = self.metadata.pool().function(idx).unwrap();
 
         if function.flags.is_native() {
-            self.call_native(idx);
-            return;
+            self.call_native(idx)?;
+            return Ok(());
         }
 
         let meta = &self.metadata;
@@ -572,15 +585,16 @@ impl<'pool> VM<'pool> {
         let offsets = self.metadata.get_code_offsets(idx).unwrap();
 
         let mut frame = Frame::new(function, offsets, sp);
-        let returns = self.run(&mut frame);
+        let returns = self.run(&mut frame)?;
         self.exit(&frame, returns);
+        Ok(())
     }
 
-    fn call_native(&mut self, idx: PoolIndex<Function>) {
-        let call = self.metadata.get_native(idx).unwrap_or_else(|| {
+    fn call_native(&mut self, idx: PoolIndex<Function>) -> RuntimeResult<()> {
+        let Some(call) = self.metadata.get_native(idx) else {
             let name = self.metadata.pool().def_name(idx).unwrap();
-            panic!("Native {} is not defined", name)
-        });
+            return Err(RuntimeError::UndefinedNative(name));
+        };
         let pool = self.metadata.pool();
 
         self.arena.mutate(|mc, root| {
@@ -588,6 +602,7 @@ impl<'pool> VM<'pool> {
                 root.push(res, mc);
             }
         });
+        Ok(())
     }
 
     fn exit(&mut self, frame: &Frame, returns: bool) {
@@ -611,36 +626,41 @@ impl<'pool> VM<'pool> {
         }
     }
 
-    fn assignment(&mut self, frame: &mut Frame) {
+    fn assignment(&mut self, frame: &mut Frame) -> RuntimeResult<()> {
         match frame.next_instr().unwrap() {
             Instr::Local(idx) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.with_local(idx, |local, mc, root| match local {
                     Value::Pinned(inner) => *inner.borrow_mut(mc) = root.pop(mc).unwrap(),
                     val => *val = root.pop(mc).unwrap(),
                 });
             }
             Instr::Param(idx) => {
-                self.exec(frame);
+                self.exec(frame)?;
                 self.with_local(idx, |local, mc, root| match local {
                     Value::Pinned(inner) => *inner.borrow_mut(mc) = root.pop(mc).unwrap(),
                     val => *val = root.pop(mc).unwrap(),
                 });
             }
             Instr::ObjectField(idx) => {
-                self.exec(frame);
+                self.exec(frame)?;
 
                 self.arena.mutate(|mc, root| {
                     let instance = root.contexts.borrow_mut(mc);
-                    let mut instance = instance.last().unwrap().as_instance().unwrap().borrow_mut(mc);
+                    let mut instance = instance
+                        .last()
+                        .and_then(Obj::as_instance)
+                        .ok_or(RuntimeError::NullPointer)?
+                        .borrow_mut(mc);
                     let field = instance.fields.get_mut(idx).unwrap();
                     let value = root.pop(mc).unwrap();
                     *field = value;
-                });
+                    Ok(())
+                })?;
             }
             Instr::StructField(idx) => {
-                self.exec(frame);
-                self.exec(frame);
+                self.exec(frame)?;
+                self.exec(frame)?;
 
                 self.arena.mutate(|mc, root| {
                     let val = root.pop(mc).unwrap();
@@ -648,14 +668,14 @@ impl<'pool> VM<'pool> {
                     match &*str.unpinned() {
                         Value::BoxedStruct(str) => str.borrow_mut(mc).put(idx, val),
                         Value::PackedStruct(_) => todo!(),
-                        _ => panic!("Not a struct"),
+                        _ => panic!("invalid bytecode"),
                     };
                 });
             }
             Instr::ArrayElement(_) => {
-                self.exec(frame);
-                self.exec(frame);
-                self.exec(frame);
+                self.exec(frame)?;
+                self.exec(frame)?;
+                self.exec(frame)?;
 
                 self.arena.mutate(|mc, root| {
                     let val = root.pop(mc).unwrap();
@@ -673,25 +693,32 @@ impl<'pool> VM<'pool> {
                 });
             }
             Instr::Context(_) => {
-                self.exec(frame);
+                self.exec(frame)?;
 
                 match frame.next_instr().unwrap() {
                     Instr::ObjectField(idx) => {
-                        self.exec(frame);
+                        self.exec(frame)?;
 
                         self.arena.mutate(|mc, root| {
                             let val = root.pop(mc).unwrap();
                             let obj = root.pop(mc).unwrap();
-                            let mut instance = obj.as_obj().unwrap().as_instance().unwrap().borrow_mut(mc);
+                            let mut instance = obj
+                                .as_obj()
+                                .unwrap()
+                                .as_instance()
+                                .ok_or(RuntimeError::NullPointer)?
+                                .borrow_mut(mc);
                             let field = instance.fields.get_mut(idx).unwrap();
                             *field = val;
-                        });
+                            Ok(())
+                        })?;
                     }
-                    _ => panic!("Unexpected assign instruction"),
+                    _ => return Err(RuntimeError::UnsupportedAssignmentOperand),
                 }
             }
-            other => panic!("Unexpected assign instruction: {other:?}"),
-        }
+            _ => return Err(RuntimeError::UnsupportedAssignmentOperand),
+        };
+        Ok(())
     }
 
     fn with_local<F, A>(&mut self, idx: PoolIndex<A>, f: F)

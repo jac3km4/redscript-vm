@@ -92,7 +92,7 @@ macro_rules! impl_function_out {
                         *pinned.borrow_mut(mc) = res.1.into_vm(mc);
                         Some(res.0.into_vm(mc))
                     } else {
-                        panic!("Expected a pinned value for out parameter")
+                        panic!("expected a pinned value for out parameter")
                     }
                 })
             }

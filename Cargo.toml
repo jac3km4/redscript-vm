@@ -14,8 +14,9 @@ edition = "2021"
 
 [workspace.dependencies]
 log = "0.4"
-rand = "0.8"
+thiserror = "1"
 anyhow = "1"
+rand = "0.8"
 itertools = "0.12"
 enum-as-inner = "0.6"
 serde = { version = "1", features = ["derive"] }

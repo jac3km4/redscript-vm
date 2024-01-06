@@ -7,7 +7,7 @@ use gc_arena::lock::{GcRefLock, RefLock};
 use gc_arena::{Collect, Gc, Mutation};
 use itertools::{Either, Itertools};
 use redscript::bundle::{ConstantPool, PoolIndex};
-use redscript::definition::Class;
+use redscript::definition::{Class, Field};
 
 use crate::index_map::IndexMap;
 use crate::interop::{FromVM, IntoVM};
@@ -72,6 +72,14 @@ impl<'gc> Value<'gc> {
     }
 
     pub fn to_string(&self, pool: &ConstantPool) -> String {
+        fn aggregate_to_string(fields: &IndexMap<Value<'_>>, pool: &ConstantPool) -> String {
+            let formatted = fields
+                .iter::<Field>()
+                .map(|(idx, val)| format!("{}: {}", pool.def_name(idx).unwrap(), val.to_string(pool)))
+                .format(", ");
+            format!("{{{formatted}}}")
+        }
+
         match self {
             Value::I8(i) => i.to_string(),
             Value::I16(i) => i.to_string(),
@@ -86,8 +94,9 @@ impl<'gc> Value<'gc> {
             Value::Bool(i) => i.to_string(),
             Value::EnumVal(i) => i.to_string(),
             Value::PackedStruct(_) => todo!(),
-            Value::BoxedStruct(_) => todo!(),
-            Value::Obj(_) => todo!(),
+            Value::BoxedStruct(struct_) => aggregate_to_string(&struct_.borrow(), pool),
+            Value::Obj(Obj::Null) => "null".to_string(),
+            Value::Obj(Obj::Instance(inst)) => aggregate_to_string(&inst.borrow().fields, pool),
             Value::Str(str) => str.as_ref().clone().into_string(),
             Value::InternStr(StringType::String, idx) => pool.strings.get(idx.to_pool()).unwrap().deref().to_owned(),
             Value::InternStr(StringType::Name, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
@@ -139,9 +148,9 @@ impl<'gc> Value<'gc> {
             (Value::F32(_), TypeId::F32) => true,
             (Value::F64(_), TypeId::F64) => true,
             (Value::Bool(_), TypeId::Bool) => true,
-            // todo: check if it's the right enum
+            // TODO: check if it's the right enum
             (Value::EnumVal(_), TypeId::Enum(_)) => true,
-            // todo: check if it's the right struct
+            // TODO: check if it's the right struct
             (Value::BoxedStruct(_), TypeId::Struct(_)) => true,
             (Value::PackedStruct(_), TypeId::Struct(_)) => true,
             (Value::Obj(Obj::Instance(cell)), TypeId::Ref(class)) => cell.borrow().tag.to_pool() == *class,
@@ -153,7 +162,7 @@ impl<'gc> Value<'gc> {
             (Value::InternStr(StringType::Name, _), TypeId::CName) => true,
             (Value::InternStr(StringType::TweakDbId, _), TypeId::TweakDbId) => true,
             (Value::InternStr(StringType::Resource, _), TypeId::ResRef) => true,
-            // todo: check if the element type matches
+            // TODO: check if the element type matches
             (Value::Array(_), TypeId::Array(_)) => true,
             (Value::Pinned(val), _) => val.borrow().has_type(typ),
             _ => false,

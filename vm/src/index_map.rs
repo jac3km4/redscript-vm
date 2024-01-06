@@ -43,6 +43,11 @@ impl<V> IndexMap<V> {
         let idx: u32 = idx.into();
         self.values.insert(idx.into(), val);
     }
+
+    #[inline]
+    pub fn iter<A>(&self) -> impl Iterator<Item = (PoolIndex<A>, &V)> {
+        self.values.iter().map(|(&key, val)| (PoolIndex::new(key as u32), val))
+    }
 }
 
 impl<V> Default for IndexMap<V> {
