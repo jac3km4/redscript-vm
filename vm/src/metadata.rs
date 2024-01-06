@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gc_arena::{GcCell, MutationContext};
+use gc_arena::lock::RefLock;
+use gc_arena::{Gc, Mutation};
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::{AnyDefinition, Class, Enum, Function, Type};
+use redscript::Ref;
 
 use crate::index_map::IndexMap;
 use crate::interop::{IntoVMFunction, VMFunction};
@@ -62,12 +64,12 @@ impl<'pool> Metadata<'pool> {
 
     #[inline]
     pub fn get_class(&self, name: &str) -> Option<PoolIndex<Class>> {
-        self.symbols.classes.get(&name.to_owned()).cloned()
+        self.symbols.classes.get(name).cloned()
     }
 
     #[inline]
     pub fn get_function(&self, name: &str) -> Option<PoolIndex<Function>> {
-        self.symbols.functions.get(&name.to_owned()).cloned()
+        self.symbols.functions.get(name).cloned()
     }
 
     #[inline]
@@ -115,9 +117,9 @@ impl<'pool> Metadata<'pool> {
 }
 
 struct Symbols {
-    functions: HashMap<Rc<String>, PoolIndex<Function>>,
-    classes: HashMap<Rc<String>, PoolIndex<Class>>,
-    enums: HashMap<Rc<String>, PoolIndex<Enum>>,
+    functions: HashMap<Ref<str>, PoolIndex<Function>>,
+    classes: HashMap<Ref<str>, PoolIndex<Class>>,
+    enums: HashMap<Ref<str>, PoolIndex<Enum>>,
 }
 
 impl Symbols {
@@ -241,7 +243,7 @@ pub enum TypeId {
 }
 
 impl TypeId {
-    pub fn default_value<'gc, 'ctx>(&self, mc: MutationContext<'gc, 'ctx>, meta: &Metadata) -> Value<'gc> {
+    pub fn default_value<'gc>(&self, mc: &Mutation<'gc>, meta: &Metadata) -> Value<'gc> {
         match self {
             TypeId::I64 => Value::I64(0),
             TypeId::I32 => Value::I32(0),
@@ -273,9 +275,9 @@ impl TypeId {
                     let typ = meta.get_type(field.type_).unwrap();
                     typ.default_value(mc, meta)
                 });
-                Value::BoxedStruct(GcCell::allocate(mc, fields.zip(values).collect()))
+                Value::BoxedStruct(Gc::new(mc, RefLock::new(fields.zip(values).collect())))
             }
-            TypeId::Array(_) => Value::Array(GcCell::allocate(mc, vec![])),
+            TypeId::Array(_) => Value::Array(Gc::new(mc, Default::default())),
             TypeId::StaticArray(_, _) => todo!(),
         }
     }
@@ -285,7 +287,7 @@ impl TypeId {
         match typ {
             Type::Prim => {
                 let name = pool.def_name(idx).ok()?;
-                let res = match name.as_str() {
+                let res = match &*name {
                     "Int64" => TypeId::I64,
                     "Int32" => TypeId::I32,
                     "Int16" => TypeId::I16,

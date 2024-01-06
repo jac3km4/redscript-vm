@@ -2,7 +2,8 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::usize;
 
-use gc_arena::{make_arena, ArenaParameters, Collect, Gc, GcCell, MutationContext};
+use gc_arena::lock::{GcRefLock, RefLock};
+use gc_arena::{Arena, Collect, Gc, Mutation, Rootable};
 use index_map::IndexMap;
 use interop::FromVM;
 use metadata::Metadata;
@@ -21,17 +22,17 @@ pub mod native;
 pub mod value;
 
 pub struct VM<'pool> {
-    arena: RootArena,
+    arena: Arena<Rootable![VMRoot<'_>]>,
     metadata: Metadata<'pool>,
 }
 
 impl<'pool> VM<'pool> {
     pub fn new(pool: &'pool ConstantPool) -> Self {
         let metadata = Metadata::new(pool);
-        let arena = RootArena::new(ArenaParameters::default(), |mc| VMRoot {
-            frames: GcCell::allocate(mc, vec![]),
-            stack: GcCell::allocate(mc, vec![]),
-            contexts: GcCell::allocate(mc, vec![]),
+        let arena = Arena::new(|mc| VMRoot {
+            frames: GcRefLock::new(mc, Default::default()),
+            stack: GcRefLock::new(mc, Default::default()),
+            contexts: GcRefLock::new(mc, Default::default()),
         });
         Self { arena, metadata }
     }
@@ -47,7 +48,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     fn push<F>(&mut self, f: F)
     where
-        for<'gc, 'ctx> F: FnOnce(MutationContext<'gc, 'ctx>) -> Value<'gc>,
+        for<'gc> F: FnOnce(&Mutation<'gc>) -> Value<'gc>,
     {
         self.arena.mutate(|mc, root| root.push(f(mc), mc))
     }
@@ -55,7 +56,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     fn pop<F, A>(&mut self, f: F) -> A
     where
-        for<'gc, 'ctx> F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> A,
+        for<'gc> F: FnOnce(Value<'gc>, &Mutation<'gc>) -> A,
     {
         self.arena.mutate(|mc, root| f(root.pop(mc).unwrap(), mc))
     }
@@ -68,7 +69,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     fn unop<F>(&mut self, f: F)
     where
-        for<'gc, 'ctx> F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+        for<'gc> F: FnOnce(Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
         self.arena.mutate(|mc, root| root.unop(f, mc))
     }
@@ -76,7 +77,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     fn binop<F>(&mut self, f: F)
     where
-        for<'gc, 'ctx> F: FnOnce(Value<'gc>, Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+        for<'gc> F: FnOnce(Value<'gc>, Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
         self.arena.mutate(|mc, root| root.binop(f, mc))
     }
@@ -170,7 +171,7 @@ impl<'pool> VM<'pool> {
             Instr::FalseConst => {
                 self.push(|_| Value::Bool(false));
             }
-            Instr::Breakpoint(_, _, _, _, _, _) => todo!(),
+            Instr::Breakpoint(_) => todo!(),
             Instr::Assign => {
                 self.assignment(frame);
             }
@@ -193,10 +194,10 @@ impl<'pool> VM<'pool> {
             }
             Instr::ObjectField(idx) => {
                 self.arena.mutate(|mc, root| {
-                    let ctx = root.contexts.read();
-                    let cell = ctx.last().unwrap().as_instance().unwrap();
-                    let mut instance = cell.write(mc);
-                    let val = instance.fields.get_mut(idx).unwrap();
+                    let contexts = root.contexts.borrow_mut(mc);
+                    let context = contexts.last().unwrap().as_instance().unwrap();
+                    let mut context = context.borrow_mut(mc);
+                    let val = context.fields.get_mut(idx).unwrap();
                     if pin {
                         val.pin(mc);
                     }
@@ -205,10 +206,10 @@ impl<'pool> VM<'pool> {
             }
             Instr::StructField(idx) => {
                 self.exec(frame);
-                self.unop(|val, mc| match val.unpinned() {
+                self.unop(|val, mc| match &*val.unpinned() {
                     Value::BoxedStruct(cell) => {
-                        let mut fields = cell.write(mc);
-                        let val = fields.get_mut(idx).unwrap();
+                        let mut val = cell.borrow_mut(mc);
+                        let val = val.get_mut(idx).unwrap();
                         if pin {
                             val.pin(mc);
                         }
@@ -220,7 +221,7 @@ impl<'pool> VM<'pool> {
             }
             Instr::ExternalVar => todo!(),
             Instr::Switch(_, _) => {
-                let sp = self.arena.mutate(|_, root| root.stack.read().len());
+                let sp = self.arena.mutate(|_, root| root.stack.borrow().len());
                 self.exec(frame);
                 let mut pos = frame.location().unwrap();
                 while let Some(Instr::SwitchLabel(next, body)) = frame.current_instr() {
@@ -228,9 +229,9 @@ impl<'pool> VM<'pool> {
 
                     self.copy(sp);
                     self.exec(frame);
-                    self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
+                    self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(&rhs)));
 
-                    let equal = self.pop(|val, _| val.unpinned().into_bool().unwrap());
+                    let equal = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
                     if equal {
                         frame.seek(body.absolute(pos));
                         break;
@@ -247,7 +248,7 @@ impl<'pool> VM<'pool> {
             }
             Instr::JumpIfFalse(offset) => {
                 self.exec(frame);
-                let cond: bool = self.pop(|val, _| val.unpinned().into_bool().unwrap());
+                let cond: bool = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
                 if !cond {
                     frame.seek(offset.absolute(location.unwrap()));
                 }
@@ -255,7 +256,7 @@ impl<'pool> VM<'pool> {
             Instr::Skip(_) => todo!(),
             Instr::Conditional(when_false, exit) => {
                 self.exec(frame);
-                let cond: bool = self.pop(|val, _| val.unpinned().into_bool().unwrap());
+                let cond: bool = self.pop(|val, _| *val.unpinned().as_bool().unwrap());
                 if !cond {
                     frame.seek(when_false.absolute(location.unwrap()));
                 }
@@ -270,20 +271,22 @@ impl<'pool> VM<'pool> {
                 let fields = class.fields.iter();
 
                 self.arena.mutate(|mc, root| {
-                    let mut stack = root.stack.write(mc);
+                    let mut stack = root.stack.borrow_mut(mc);
                     let range = (stack.len() - args as usize)..;
                     let args = stack.drain(range);
                     let data = fields.copied().zip(args).collect();
-                    stack.push(Value::BoxedStruct(GcCell::allocate(mc, data)))
+                    stack.push(Value::BoxedStruct(Gc::new(mc, RefLock::new(data))))
                 });
             }
             Instr::InvokeStatic(_, _, idx, _) => {
                 self.call_static(idx, frame);
             }
             Instr::InvokeVirtual(_, _, name, _) => {
-                let tag = self
-                    .arena
-                    .mutate(|_, root| root.contexts.read().last().unwrap().as_instance().unwrap().read().tag);
+                let tag = self.arena.mutate(|_, root| {
+                    let ctx = root.contexts.borrow();
+                    let inst = ctx.last().unwrap().as_instance().unwrap();
+                    inst.borrow().tag
+                });
                 let vtable = self.metadata.get_vtable(tag.to_pool()).unwrap();
                 let idx = vtable.get(name).unwrap().to_pool();
                 self.call_static(idx, frame);
@@ -300,40 +303,42 @@ impl<'pool> VM<'pool> {
             Instr::Context(_) => {
                 self.exec(frame);
                 self.arena.mutate(|mc, root| {
-                    let obj = root.pop(mc).unwrap().unpinned().into_obj().unwrap();
-                    root.contexts.write(mc).push(obj)
+                    let val = root.pop(mc).unwrap();
+                    let val = val.unpinned();
+                    let obj = val.as_obj().unwrap();
+                    root.contexts.borrow_mut(mc).push(obj.clone());
                 });
                 self.exec(frame);
                 self.arena.mutate(|mc, root| {
-                    root.contexts.write(mc).pop();
+                    root.contexts.borrow_mut(mc).pop();
                 });
             }
             Instr::Equals(_) => {
                 self.exec(frame);
                 self.exec(frame);
-                self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(rhs)));
+                self.binop(|lhs, rhs, _| Value::Bool(lhs.equals(&rhs)));
             }
+            Instr::RefStringEqualsString(_) | Instr::StringEqualsRefString(_) => todo!(),
             Instr::NotEquals(_) => {
                 self.exec(frame);
                 self.exec(frame);
-                self.binop(|lhs, rhs, _| Value::Bool(!lhs.equals(rhs)));
+                self.binop(|lhs, rhs, _| Value::Bool(!lhs.equals(&rhs)));
             }
+            Instr::RefStringNotEqualsString(_) | Instr::StringNotEqualsRefString(_) => todo!(),
             Instr::New(class) => {
                 let meta = &mut self.metadata;
                 self.arena.mutate(|mc, root| {
                     let instance = Instance::new(class, meta, mc);
-                    root.push(Value::Obj(Obj::Instance(GcCell::allocate(mc, instance))), mc);
+                    root.push(Value::Obj(Obj::Instance(Gc::new(mc, RefLock::new(instance)))), mc);
                 });
                 self.check_gc();
             }
             Instr::Delete => todo!(),
             Instr::This => {
-                self.arena.mutate(|mc, root| {
-                    let obj = root.contexts.read();
-                    root.push(Value::Obj(obj.last().unwrap().clone()), mc)
-                });
+                self.arena
+                    .mutate(|mc, root| root.push(Value::Obj(root.contexts.borrow().last().unwrap().clone()), mc));
             }
-            Instr::StartProfiling(_, _) => todo!(),
+            Instr::StartProfiling(_) => todo!(),
             Instr::ArrayClear(_) => {
                 array::clear(self, frame);
             }
@@ -397,6 +402,7 @@ impl<'pool> VM<'pool> {
             Instr::ArrayElement(_) => {
                 array::element(self, frame);
             }
+            Instr::ArraySort(_) | Instr::ArraySortByPredicate(_) => todo!(),
             Instr::StaticArraySize(_) => todo!(),
             Instr::StaticArrayFindFirst(_) => todo!(),
             Instr::StaticArrayFindFirstFast(_) => todo!(),
@@ -424,32 +430,34 @@ impl<'pool> VM<'pool> {
             }
             Instr::EnumToI32(_, _) => {
                 self.exec(frame);
-                self.unop(|val, _| Value::I32(val.unpinned().into_enum_val().unwrap() as i32))
+                self.unop(|val, _| Value::I32(*val.unpinned().as_enum_val().unwrap() as i32))
             }
             Instr::I32ToEnum(_, _) => {
                 self.exec(frame);
-                self.unop(|val, _| Value::EnumVal(val.unpinned().into_i32().unwrap().into()))
+                self.unop(|val, _| Value::EnumVal((*val.unpinned().as_i32().unwrap()).into()))
             }
             Instr::DynamicCast(expected, _) => {
                 self.exec(frame);
 
                 let meta = &self.metadata;
                 self.arena.mutate(|mc, root| {
-                    let mut stack = root.stack.write(mc);
-                    let obj = stack.pop().unwrap().unpinned().into_obj().unwrap();
-                    let tag = obj.as_instance().unwrap().read().tag.to_pool();
-                    let res = if meta.is_instance_of(tag, expected) {
-                        obj
+                    let mut stack = root.stack.borrow_mut(mc);
+                    let val = stack.pop().unwrap();
+                    let val = val.unpinned();
+                    let obj = val.as_obj().unwrap();
+                    let tag = obj.as_instance().unwrap().borrow().tag.to_pool();
+                    let obj = if meta.is_instance_of(tag, expected) {
+                        obj.clone()
                     } else {
                         Obj::Null
                     };
-                    stack.push(Value::Obj(res))
+                    stack.push(Value::Obj(obj))
                 });
             }
             Instr::ToString(_) => {
                 self.exec(frame);
                 let pool = self.metadata.pool();
-                self.unop(|val, mc| Value::Str(Gc::allocate(mc, val.to_string(pool))));
+                self.unop(|val, mc| Value::Str(Gc::new(mc, val.to_string(pool).into_boxed_str())));
             }
             Instr::ToVariant(_) => {
                 self.exec(frame);
@@ -471,11 +479,11 @@ impl<'pool> VM<'pool> {
             }
             Instr::AsRef(_) => {
                 self.exec(frame);
-                self.unop(|val, mc| Value::Pinned(GcCell::allocate(mc, val)));
+                self.unop(|val, mc| Value::Pinned(Gc::new(mc, RefLock::new(val))));
             }
             Instr::Deref(_) => {
                 self.exec(frame);
-                self.unop(|val, _| val.unpinned());
+                self.unop(|val, _| val.unpinned().clone());
             }
         };
         Action::Continue
@@ -484,7 +492,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     pub fn call<F, A>(&mut self, idx: PoolIndex<Function>, args: F) -> A
     where
-        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+        F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
         A: for<'gc> FromVM<'gc>,
     {
         let pool = self.metadata.pool();
@@ -494,7 +502,7 @@ impl<'pool> VM<'pool> {
     #[inline]
     pub fn call_with_callback<F, C, A>(&mut self, idx: PoolIndex<Function>, args: F, cb: C) -> A
     where
-        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+        F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
         C: for<'gc> Fn(Option<Value<'gc>>) -> A,
     {
         self.call_void(idx, args);
@@ -503,7 +511,7 @@ impl<'pool> VM<'pool> {
 
     pub fn call_void<F>(&mut self, idx: PoolIndex<Function>, args: F)
     where
-        F: for<'gc, 'ctx> Fn(MutationContext<'gc, 'ctx>) -> Vec<Value<'gc>>,
+        F: for<'gc> Fn(&Mutation<'gc>) -> Vec<Value<'gc>>,
     {
         let function = self.metadata.pool().function(idx).unwrap();
         self.arena.mutate(|mc, root| {
@@ -545,7 +553,7 @@ impl<'pool> VM<'pool> {
 
         let meta = &self.metadata;
         self.arena.mutate(|mc, root| {
-            let mut stack = root.stack.write(mc);
+            let mut stack = root.stack.borrow_mut(mc);
             let mut locals = IndexMap::with_capacity(function.locals.len() + params.len());
 
             for idx in params.iter().rev() {
@@ -557,10 +565,10 @@ impl<'pool> VM<'pool> {
                 let typ = meta.get_type(local.type_).unwrap();
                 locals.put(*idx, typ.default_value(mc, meta));
             }
-            root.frames.write(mc).push(locals);
+            root.frames.borrow_mut(mc).push(locals);
         });
 
-        let sp = self.arena.mutate(|_, root| root.stack.read().len());
+        let sp = self.arena.mutate(|_, root| root.stack.borrow().len());
         let offsets = self.metadata.get_code_offsets(idx).unwrap();
 
         let mut frame = Frame::new(function, offsets, sp);
@@ -584,7 +592,7 @@ impl<'pool> VM<'pool> {
 
     fn exit(&mut self, frame: &Frame, returns: bool) {
         self.arena.mutate(|mc, root| {
-            let mut stack = root.stack.write(mc);
+            let mut stack = root.stack.borrow_mut(mc);
             if returns {
                 let val = stack.pop().unwrap();
                 stack.resize(frame.sp, Value::Obj(Obj::Null));
@@ -592,13 +600,13 @@ impl<'pool> VM<'pool> {
             } else {
                 stack.resize(frame.sp, Value::Obj(Obj::Null));
             }
-            root.frames.write(mc).pop();
+            root.frames.borrow_mut(mc).pop();
         });
     }
 
     fn check_gc(&mut self) {
-        if self.arena.allocation_debt() >= 64000. {
-            log::debug!("GC incremental step, debt: {}", self.arena.allocation_debt());
+        if self.arena.metrics().allocation_debt() >= 64000. {
+            log::debug!("GC incremental step, debt: {}", self.arena.metrics().allocation_debt());
             self.arena.collect_debt();
         }
     }
@@ -608,14 +616,14 @@ impl<'pool> VM<'pool> {
             Instr::Local(idx) => {
                 self.exec(frame);
                 self.with_local(idx, |local, mc, root| match local {
-                    Value::Pinned(inner) => *inner.write(mc) = root.pop(mc).unwrap(),
+                    Value::Pinned(inner) => *inner.borrow_mut(mc) = root.pop(mc).unwrap(),
                     val => *val = root.pop(mc).unwrap(),
                 });
             }
             Instr::Param(idx) => {
                 self.exec(frame);
                 self.with_local(idx, |local, mc, root| match local {
-                    Value::Pinned(inner) => *inner.write(mc) = root.pop(mc).unwrap(),
+                    Value::Pinned(inner) => *inner.borrow_mut(mc) = root.pop(mc).unwrap(),
                     val => *val = root.pop(mc).unwrap(),
                 });
             }
@@ -623,8 +631,8 @@ impl<'pool> VM<'pool> {
                 self.exec(frame);
 
                 self.arena.mutate(|mc, root| {
-                    let ctx = root.contexts.read();
-                    let mut instance = ctx.last().unwrap().as_instance().unwrap().write(mc);
+                    let instance = root.contexts.borrow_mut(mc);
+                    let mut instance = instance.last().unwrap().as_instance().unwrap().borrow_mut(mc);
                     let field = instance.fields.get_mut(idx).unwrap();
                     let value = root.pop(mc).unwrap();
                     *field = value;
@@ -637,11 +645,31 @@ impl<'pool> VM<'pool> {
                 self.arena.mutate(|mc, root| {
                     let val = root.pop(mc).unwrap();
                     let str = root.pop(mc).unwrap();
-                    match str.unpinned() {
-                        Value::BoxedStruct(str) => str.write(mc).put(idx, val),
+                    match &*str.unpinned() {
+                        Value::BoxedStruct(str) => str.borrow_mut(mc).put(idx, val),
                         Value::PackedStruct(_) => todo!(),
                         _ => panic!("Not a struct"),
                     };
+                });
+            }
+            Instr::ArrayElement(_) => {
+                self.exec(frame);
+                self.exec(frame);
+                self.exec(frame);
+
+                self.arena.mutate(|mc, root| {
+                    let val = root.pop(mc).unwrap();
+                    let idx = root.pop(mc).unwrap();
+                    let idx = idx
+                        .as_i32()
+                        .copied()
+                        .map(|i| i as u64)
+                        .or_else(|| idx.as_u64().copied())
+                        .unwrap();
+                    let array = root.pop(mc).unwrap();
+                    let array = array.unpinned();
+                    let array = array.as_array().unwrap();
+                    array.borrow_mut(mc)[idx as usize] = val;
                 });
             }
             Instr::Context(_) => {
@@ -652,27 +680,27 @@ impl<'pool> VM<'pool> {
                         self.exec(frame);
 
                         self.arena.mutate(|mc, root| {
-                            let value = root.pop(mc).unwrap();
+                            let val = root.pop(mc).unwrap();
                             let obj = root.pop(mc).unwrap();
-                            let mut instance = obj.as_obj().unwrap().as_instance().unwrap().write(mc);
+                            let mut instance = obj.as_obj().unwrap().as_instance().unwrap().borrow_mut(mc);
                             let field = instance.fields.get_mut(idx).unwrap();
-                            *field = value;
+                            *field = val;
                         });
                     }
                     _ => panic!("Unexpected assign instruction"),
                 }
             }
-            _ => panic!("Unexpected assign instruction"),
+            other => panic!("Unexpected assign instruction: {other:?}"),
         }
     }
 
     fn with_local<F, A>(&mut self, idx: PoolIndex<A>, f: F)
     where
-        F: for<'gc, 'ctx> FnOnce(&'ctx mut Value<'gc>, MutationContext<'gc, 'ctx>, &'ctx VMRoot<'gc>),
+        F: for<'gc> FnOnce(&mut Value<'gc>, &Mutation<'gc>, &VMRoot<'gc>),
     {
         self.arena.mutate(|mc, root| {
-            let mut frames = root.frames.write(mc);
-            let local = frames.last_mut().unwrap().get_mut(idx).unwrap();
+            let mut local = root.frames.borrow_mut(mc);
+            let local = local.last_mut().unwrap().get_mut(idx).unwrap();
             f(local, mc, root)
         });
     }
@@ -734,55 +762,53 @@ enum Action {
 #[derive(Collect)]
 #[collect(no_drop)]
 pub struct VMRoot<'gc> {
-    frames: GcCell<'gc, Vec<IndexMap<Value<'gc>>>>,
-    stack: GcCell<'gc, Vec<Value<'gc>>>,
-    contexts: GcCell<'gc, Vec<Obj<'gc>>>,
+    frames: GcRefLock<'gc, Vec<IndexMap<Value<'gc>>>>,
+    stack: GcRefLock<'gc, Vec<Value<'gc>>>,
+    contexts: GcRefLock<'gc, Vec<Obj<'gc>>>,
 }
 
 impl<'gc> VMRoot<'gc> {
     #[inline]
-    fn pop<'ctx>(&self, mc: MutationContext<'gc, 'ctx>) -> Option<Value<'gc>> {
-        self.stack.write(mc).pop()
+    fn pop(&self, mc: &Mutation<'gc>) -> Option<Value<'gc>> {
+        self.stack.borrow_mut(mc).pop()
     }
 
     #[inline]
-    fn push<'ctx>(&self, val: Value<'gc>, mc: MutationContext<'gc, 'ctx>) {
-        self.stack.write(mc).push(val)
+    fn push(&self, val: Value<'gc>, mc: &Mutation<'gc>) {
+        self.stack.borrow_mut(mc).push(val);
     }
 
     #[inline]
-    fn copy<'ctx>(&self, idx: usize, mc: MutationContext<'gc, 'ctx>) {
-        let mut stack = self.stack.write(mc);
+    fn copy(&self, idx: usize, mc: &Mutation<'gc>) {
+        let mut stack = self.stack.borrow_mut(mc);
         let val = stack[idx].clone();
         stack.push(val);
     }
 
     #[inline]
-    fn unop<'ctx, F>(&self, fun: F, mc: MutationContext<'gc, 'ctx>)
+    fn unop<F>(&self, fun: F, mc: &Mutation<'gc>)
     where
-        F: FnOnce(Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+        F: FnOnce(Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
-        let mut stack = self.stack.write(mc);
+        let mut stack = self.stack.borrow_mut(mc);
         let val = stack.pop().unwrap();
         stack.push(fun(val, mc))
     }
 
     #[inline]
-    fn binop<'ctx, F>(&self, fun: F, mc: MutationContext<'gc, 'ctx>)
+    fn binop<F>(&self, fun: F, mc: &Mutation<'gc>)
     where
-        F: FnOnce(Value<'gc>, Value<'gc>, MutationContext<'gc, 'ctx>) -> Value<'gc>,
+        F: FnOnce(Value<'gc>, Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
-        let mut stack = self.stack.write(mc);
+        let mut stack = self.stack.borrow_mut(mc);
         let rhs = stack.pop().unwrap();
         let lhs = stack.pop().unwrap();
         stack.push(fun(lhs, rhs, mc))
     }
 
     #[inline]
-    fn adjust_stack<'ctx>(&self, size: usize, mc: MutationContext<'gc, 'ctx>) {
-        let mut stack = self.stack.write(mc);
+    fn adjust_stack(&self, size: usize, mc: &Mutation<'gc>) {
+        let mut stack = self.stack.borrow_mut(mc);
         stack.resize(size, Value::Obj(Obj::Null));
     }
 }
-
-make_arena!(RootArena, VMRoot);

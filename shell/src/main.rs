@@ -2,21 +2,20 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, ScriptBundle};
 use redscript_compiler::error::Error;
 use redscript_compiler::source_map::{Files, SourceFilter};
 use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};
 use rustyline::error::ReadlineError;
-use rustyline::Editor;
+use rustyline::DefaultEditor;
 use serde::Deserialize;
 
 mod test;
 
 const HISTORY_FILE: &str = "redscript-history.txt";
 
-fn main() -> Result<(), Error> {
+fn main() -> anyhow::Result<()> {
     let location = std::env::current_dir()?.join("redscript.toml");
     match ShellConfig::load(&location) {
         Ok(config) => {
@@ -26,15 +25,15 @@ fn main() -> Result<(), Error> {
         }
         Err(error) => {
             println!("Failed to load the shell config (redscript.toml is required)");
-            Err(error)
+            Err(error.into())
         }
     }
 }
 
-fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
+fn repl(pool: ConstantPool, config: &ShellConfig) -> anyhow::Result<()> {
     println!("Welcome to the redscript shell! Type 'help' for more information.");
 
-    let mut rl = Editor::<()>::new();
+    let mut rl = DefaultEditor::new()?;
     if rl.load_history(HISTORY_FILE).is_err() {
         println!("No previous history");
     }
@@ -42,7 +41,7 @@ fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
         let readline = rl.readline(">> ");
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
+                rl.add_history_entry(line.as_str())?;
                 match Command::parse(&line) {
                     Ok(cmd) => match execute(cmd, pool.clone(), config) {
                         Ok(true) => break,
@@ -64,11 +63,11 @@ fn repl(pool: ConstantPool, config: &ShellConfig) -> Result<(), Error> {
             }
         }
     }
-    rl.save_history(HISTORY_FILE).unwrap();
+    rl.save_history(HISTORY_FILE)?;
     Ok(())
 }
 
-fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result<bool, Error> {
+fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> anyhow::Result<bool> {
     match command {
         Command::RunMain => {
             run_function(pool, "main;", config)?;
@@ -90,8 +89,8 @@ fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> Result
     }
 }
 
-fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> Result<(), Error> {
-    let sources = Files::from_dir(&config.source_dir, SourceFilter::None)?;
+fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -> anyhow::Result<()> {
+    let sources = Files::from_dir(&config.source_dir, &SourceFilter::None)?;
     CompilationUnit::new_with_defaults(&mut pool)?.compile_files(&sources)?;
 
     let mut vm = VM::new(&pool);
@@ -100,7 +99,7 @@ fn run_function(mut pool: ConstantPool, func_name: &str, config: &ShellConfig) -
     let main = vm
         .metadata()
         .get_function(func_name)
-        .ok_or_else(|| Error::CompileError("No main function".to_owned(), Span::ZERO))?;
+        .ok_or_else(|| anyhow::anyhow!("No main function"))?;
     let out = vm.call_with_callback(main, args!(), |res| res.map(|val| val.to_string(&pool)));
     if let Some(res) = out {
         println!("result: {}", res);

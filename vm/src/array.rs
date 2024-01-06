@@ -2,21 +2,30 @@ use crate::*;
 
 pub fn clear(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
-    vm.pop(|val, mc| val.unpinned().as_array().unwrap().write(mc).clear());
+    vm.pop(|val, mc| val.unpinned().as_array().unwrap().borrow_mut(mc).clear());
 }
 
 pub fn size(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
-    vm.unop(|val, _| Value::I32(val.unpinned().as_array().unwrap().read().len() as i32));
+    vm.unop(|val, _| Value::I32(val.unpinned().as_array().unwrap().borrow().len() as i32));
 }
 
 pub fn resize(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.arena.mutate(|mc, root| {
-        let size = root.pop(mc).unwrap().unpinned().into_i32().unwrap();
-        let array = root.pop(mc).unwrap().unpinned().into_array().unwrap();
-        array.write(mc).resize(size as usize, Value::Obj(Obj::Null));
+        let val = root.pop(mc).unwrap();
+        let val = val.unpinned();
+        let size = val
+            .as_i32()
+            .copied()
+            .map(|i| i as u64)
+            .or_else(|| val.as_u64().copied())
+            .unwrap();
+        let val = root.pop(mc).unwrap();
+        let val = val.unpinned();
+        let array = val.as_array().unwrap();
+        array.borrow_mut(mc).resize(size as usize, Value::Obj(Obj::Null));
     });
 }
 
@@ -24,9 +33,9 @@ pub fn find_first(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, needle, _| {
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        if let Some(res) = array.iter().cloned().find(|el| el.clone().equals(needle.clone())) {
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        if let Some(res) = array.borrow().iter().find(|el| el.equals(&needle)).cloned() {
             res
         } else {
             Value::Obj(Obj::Null)
@@ -38,10 +47,10 @@ pub fn find_last(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, needle, _| {
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        if let Some(res) = array.iter().rev().cloned().find(|el| el.clone().equals(needle.clone())) {
-            res
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        if let Some(res) = array.borrow().iter().rev().find(|el| el.equals(&needle)) {
+            res.clone()
         } else {
             Value::Obj(Obj::Null)
         }
@@ -52,9 +61,9 @@ pub fn contains(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, needle, _| {
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        let exists = array.iter().any(|el| el.clone().equals(needle.clone()));
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        let exists = array.borrow().iter().any(|el| el.equals(&needle));
         Value::Bool(exists)
     });
 }
@@ -63,13 +72,9 @@ pub fn count(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, needle, _| {
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        let count = array
-            .iter()
-            .cloned()
-            .filter(|el| el.clone().equals(needle.clone()))
-            .count();
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        let count = array.borrow().iter().filter(|el| el.equals(&needle)).count();
         Value::I32(count as i32)
     });
 }
@@ -78,18 +83,20 @@ pub fn push(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.arena.mutate(|mc, root| {
-        let value = root.pop(mc).unwrap();
-        let array = root.pop(mc).unwrap().unpinned().into_array().unwrap();
-        array.write(mc).push(value);
+        let val = root.pop(mc).unwrap();
+        let array = root.pop(mc).unwrap();
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        array.borrow_mut(mc).push(val);
     });
 }
 
 pub fn pop(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.unop(|array, mc| {
-        let cell = array.unpinned().into_array().unwrap();
-        let mut array = cell.write(mc);
-        array.pop().unwrap()
+        let binding = array.unpinned();
+        let array = binding.as_array().unwrap();
+        array.borrow_mut(mc).pop().unwrap()
     });
 }
 
@@ -99,9 +106,13 @@ pub fn insert(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.arena.mutate(|mc, root| {
         let value = root.pop(mc).unwrap();
-        let index = root.pop(mc).unwrap().unpinned().into_i32().unwrap();
-        let array = root.pop(mc).unwrap().unpinned().into_array().unwrap();
-        array.write(mc).insert(index as usize, value);
+        let index = root.pop(mc).unwrap();
+        let index = index.unpinned();
+        let index = index.as_i32().unwrap();
+        let array = root.pop(mc).unwrap();
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        array.borrow_mut(mc).insert(*index as usize, value);
     });
 }
 
@@ -109,9 +120,10 @@ pub fn remove(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, needle, mc| {
-        let cell = array.unpinned().into_array().unwrap();
-        let mut array = cell.write(mc);
-        if let Some(idx) = array.iter().position(|el| el.clone().equals(needle.clone())) {
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        let mut array = array.borrow_mut(mc);
+        if let Some(idx) = array.iter().position(|el| el.equals(&needle)) {
             array.remove(idx);
             Value::Bool(true)
         } else {
@@ -124,11 +136,13 @@ pub fn erase(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, index, mc| {
-        let index = index.unpinned().into_i32().unwrap();
-        let cell = array.unpinned().into_array().unwrap();
-        let mut array = cell.write(mc);
-        if array.get(index as usize).is_some() {
-            array.remove(index as usize);
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        let mut array = array.borrow_mut(mc);
+        let index = index.unpinned();
+        let index = index.as_i32().unwrap();
+        if array.get(*index as usize).is_some() {
+            array.remove(*index as usize);
             Value::Bool(true)
         } else {
             Value::Bool(false)
@@ -139,9 +153,9 @@ pub fn erase(vm: &mut VM, frame: &mut Frame) {
 pub fn last(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.unop(|array, _| {
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        array.last().unwrap().clone()
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        array.borrow().last().unwrap().clone()
     });
 }
 
@@ -149,9 +163,10 @@ pub fn element(vm: &mut VM, frame: &mut Frame) {
     vm.exec(frame);
     vm.exec(frame);
     vm.binop(|array, index, _| {
-        let index = index.unpinned().into_i32().unwrap();
-        let cell = array.unpinned().into_array().unwrap();
-        let array = cell.read();
-        array.get(index as usize).unwrap().clone()
+        let array = array.unpinned();
+        let array = array.as_array().unwrap();
+        let index = index.unpinned();
+        let index = index.as_i32().unwrap();
+        array.borrow().get(*index as usize).unwrap().clone()
     });
 }

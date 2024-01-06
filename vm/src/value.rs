@@ -3,8 +3,9 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use enum_as_inner::EnumAsInner;
-use gc_arena::{Collect, Gc, GcCell, MutationContext};
-use itertools::Itertools;
+use gc_arena::lock::{GcRefLock, RefLock};
+use gc_arena::{Collect, Gc, Mutation};
+use itertools::{Either, Itertools};
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::Class;
 
@@ -28,12 +29,12 @@ pub enum Value<'gc> {
     Bool(bool),
     EnumVal(i64),
     PackedStruct(PackedStruct),
-    BoxedStruct(GcCell<'gc, IndexMap<Value<'gc>>>),
+    BoxedStruct(GcRefLock<'gc, IndexMap<Value<'gc>>>),
     Obj(Obj<'gc>),
-    Str(Gc<'gc, String>),
+    Str(Gc<'gc, Box<str>>),
     InternStr(StringType, VMIndex),
-    Array(GcCell<'gc, Vec<Value<'gc>>>),
-    Pinned(GcCell<'gc, Value<'gc>>),
+    Array(GcRefLock<'gc, Vec<Value<'gc>>>),
+    Pinned(GcRefLock<'gc, Value<'gc>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Collect)]
@@ -47,30 +48,25 @@ pub enum StringType {
 
 impl<'gc> Value<'gc> {
     #[inline]
-    pub fn unpinned(self) -> Self {
+    pub fn unpinned(&self) -> impl Deref<Target = Self> + '_ {
         match self {
-            Value::Pinned(cell) => cell.read().clone(),
-            other => other,
+            Value::Pinned(cell) => Either::Left(cell.borrow()),
+            other => Either::Right(other),
         }
     }
 
     #[inline]
-    pub fn pin<'ctx>(&mut self, mc: MutationContext<'gc, 'ctx>) {
+    pub fn pin(&mut self, mc: &Mutation<'gc>) {
         if !self.is_pinned() {
-            let pinned = Value::Pinned(GcCell::allocate(mc, self.clone()));
+            let pinned = Value::Pinned(Gc::new(mc, RefLock::new(self.clone())));
             *self = pinned;
         }
     }
 
     #[inline]
-    pub fn is_pinned(&self) -> bool {
-        matches!(self, Value::Pinned(_))
-    }
-
-    #[inline]
-    pub fn copied(&self, mc: MutationContext<'gc, '_>) -> Self {
+    pub fn copied(&self, mc: &Mutation<'gc>) -> Self {
         match self {
-            Value::BoxedStruct(str) => Value::BoxedStruct(GcCell::allocate(mc, str.read().clone())),
+            Value::BoxedStruct(str) => Value::BoxedStruct(Gc::new(mc, str.as_ref().clone())),
             other => other.clone(),
         }
     }
@@ -92,26 +88,26 @@ impl<'gc> Value<'gc> {
             Value::PackedStruct(_) => todo!(),
             Value::BoxedStruct(_) => todo!(),
             Value::Obj(_) => todo!(),
-            Value::Str(str) => str.deref().to_owned(),
+            Value::Str(str) => str.as_ref().clone().into_string(),
             Value::InternStr(StringType::String, idx) => pool.strings.get(idx.to_pool()).unwrap().deref().to_owned(),
             Value::InternStr(StringType::Name, idx) => pool.names.get(idx.to_pool()).unwrap().deref().to_owned(),
             Value::InternStr(StringType::TweakDbId, idx) => {
-                pool.tweakdb_ids.get(idx.to_pool()).unwrap().deref().to_owned()
+                pool.tweakdb_ids.get(idx.to_pool()).unwrap().as_ref().to_owned()
             }
             Value::InternStr(StringType::Resource, idx) => {
-                pool.resources.get(idx.to_pool()).unwrap().deref().to_owned()
+                pool.resources.get(idx.to_pool()).unwrap().as_ref().to_owned()
             }
-            Value::Array(val) => {
-                let val = val.read();
-                let cnts = val.iter().map(|val| val.to_string(pool)).format(", ");
-                format!("[{cnts}]")
+            Value::Array(arr) => {
+                let arr = arr.borrow();
+                let formatted = arr.iter().map(|val| val.to_string(pool)).format(", ");
+                format!("[{formatted}]")
             }
-            Value::Pinned(v) => v.read().to_string(pool),
+            Value::Pinned(v) => v.borrow().to_string(pool),
         }
     }
 
-    pub fn equals(self, other: Value) -> bool {
-        match (self.unpinned(), other.unpinned()) {
+    pub fn equals(&self, other: &Self) -> bool {
+        match (&*self.unpinned(), &*other.unpinned()) {
             (Value::I8(lhs), Value::I8(rhs)) => lhs == rhs,
             (Value::I16(lhs), Value::I16(rhs)) => lhs == rhs,
             (Value::I32(lhs), Value::I32(rhs)) => lhs == rhs,
@@ -124,7 +120,7 @@ impl<'gc> Value<'gc> {
             (Value::F64(lhs), Value::F64(rhs)) => lhs == rhs,
             (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
             (Value::EnumVal(lhs), Value::EnumVal(rhs)) => lhs == rhs,
-            (Value::Str(lhs), Value::Str(rhs)) => lhs.as_str() == rhs.as_str(),
+            (Value::Str(lhs), Value::Str(rhs)) => *lhs == *rhs,
             (Value::InternStr(ltyp, lidx), Value::InternStr(rtyp, ridx)) => ltyp == rtyp && lidx == ridx,
             _ => false,
         }
@@ -148,8 +144,8 @@ impl<'gc> Value<'gc> {
             // todo: check if it's the right struct
             (Value::BoxedStruct(_), TypeId::Struct(_)) => true,
             (Value::PackedStruct(_), TypeId::Struct(_)) => true,
-            (Value::Obj(Obj::Instance(cell)), TypeId::Ref(class)) => cell.read().tag.to_pool() == *class,
-            (Value::Obj(Obj::Instance(cell)), TypeId::WRef(class)) => cell.read().tag.to_pool() == *class,
+            (Value::Obj(Obj::Instance(cell)), TypeId::Ref(class)) => cell.borrow().tag.to_pool() == *class,
+            (Value::Obj(Obj::Instance(cell)), TypeId::WRef(class)) => cell.borrow().tag.to_pool() == *class,
             (Value::Obj(Obj::Null), TypeId::Ref(_)) => true,
             (Value::Obj(Obj::Null), TypeId::WRef(_)) => true,
             (Value::Str(_), TypeId::String) => true,
@@ -159,7 +155,7 @@ impl<'gc> Value<'gc> {
             (Value::InternStr(StringType::Resource, _), TypeId::ResRef) => true,
             // todo: check if the element type matches
             (Value::Array(_), TypeId::Array(_)) => true,
-            (Value::Pinned(val), _) => val.read().has_type(typ),
+            (Value::Pinned(val), _) => val.borrow().has_type(typ),
             _ => false,
         }
     }
@@ -169,7 +165,7 @@ impl<'gc> Value<'gc> {
 #[collect(no_drop)]
 pub enum Obj<'gc> {
     Null,
-    Instance(GcCell<'gc, Instance<'gc>>),
+    Instance(GcRefLock<'gc, Instance<'gc>>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Collect)]
@@ -179,12 +175,14 @@ pub struct VMIndex(pub u32);
 impl VMIndex {
     pub const ZERO: VMIndex = VMIndex(0);
 
+    #[inline]
     pub fn to_pool<A>(self) -> PoolIndex<A> {
         PoolIndex::new(self.0)
     }
 }
 
 impl<A> From<PoolIndex<A>> for VMIndex {
+    #[inline]
     fn from(idx: PoolIndex<A>) -> Self {
         VMIndex(idx.into())
     }
@@ -199,7 +197,7 @@ pub struct Instance<'gc> {
 }
 
 impl<'gc> Instance<'gc> {
-    pub fn new<'ctx, 'pool>(idx: PoolIndex<Class>, meta: &mut Metadata<'pool>, mc: MutationContext<'gc, 'ctx>) -> Self {
+    pub fn new(idx: PoolIndex<Class>, meta: &mut Metadata<'_>, mc: &Mutation<'gc>) -> Self {
         let mut current = idx;
         let mut fields = IndexMap::new();
         while !current.is_undefined() {
@@ -233,15 +231,15 @@ macro_rules! impl_prim_conversions {
     ($typ:ty, $constructor:ident) => {
         impl<'gc> IntoVM<'gc> for $typ {
             #[inline]
-            fn into_vm<'ctx>(self, _mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
+            fn into_vm<'ctx>(self, _mc: &Mutation<'gc>) -> Value<'gc> {
                 Value::$constructor(self)
             }
         }
 
         impl<'gc> FromVM<'gc> for $typ {
             fn from_vm<'pool>(val: Value<'gc>, _pool: &'pool ConstantPool) -> Result<Self, &'static str> {
-                match val.unpinned() {
-                    Value::$constructor(i) => Ok(i),
+                match &*val.unpinned() {
+                    Value::$constructor(i) => Ok(*i),
                     _ => Err(concat!("Invalid argument, expected ", stringify!($constructor))),
                 }
             }
@@ -262,9 +260,9 @@ impl_prim_conversions!(f64, F64);
 impl_prim_conversions!(bool, Bool);
 
 impl<'gc> FromVM<'gc> for String {
-    fn from_vm<'pool>(val: Value<'gc>, pool: &'pool ConstantPool) -> Result<Self, &'static str> {
-        match val.unpinned() {
-            Value::Str(i) => Ok(i.deref().clone()),
+    fn from_vm(val: Value<'gc>, pool: &ConstantPool) -> Result<Self, &'static str> {
+        match &*val.unpinned() {
+            Value::Str(i) => Ok(i.as_ref().clone().into_string()),
             Value::InternStr(StringType::String, idx) => pool
                 .strings
                 .get(idx.to_pool())
@@ -277,14 +275,14 @@ impl<'gc> FromVM<'gc> for String {
 
 impl<'gc> IntoVM<'gc> for String {
     #[inline]
-    fn into_vm<'ctx>(self, mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
-        Value::Str(Gc::allocate(mc, self))
+    fn into_vm(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        Value::Str(Gc::new(mc, self.into_boxed_str()))
     }
 }
 
 impl<'gc> IntoVM<'gc> for &'static str {
     #[inline]
-    fn into_vm<'ctx>(self, mc: MutationContext<'gc, 'ctx>) -> Value<'gc> {
-        Value::Str(Gc::allocate(mc, self.to_owned()))
+    fn into_vm(self, mc: &Mutation<'gc>) -> Value<'gc> {
+        Value::Str(Gc::new(mc, self.into()))
     }
 }

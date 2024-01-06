@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::iter::FromIterator;
 use std::usize;
 
-use gc_arena::{Collect, CollectionContext};
+use gc_arena::{Collect, Collection};
 use intmap::IntMap;
 use redscript::bundle::PoolIndex;
 
@@ -14,29 +14,31 @@ pub struct IndexMap<V> {
 }
 
 impl<V> IndexMap<V> {
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[inline]
     pub fn with_capacity(len: usize) -> Self {
         Self {
             values: IntMap::with_capacity(len),
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_mut<A>(&mut self, idx: PoolIndex<A>) -> Option<&mut V> {
         let idx: u32 = idx.into();
         self.values.get_mut(idx.into())
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get<A>(&self, idx: PoolIndex<A>) -> Option<&V> {
         let idx: u32 = idx.into();
         self.values.get(idx.into())
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn put<A>(&mut self, idx: PoolIndex<A>, val: V) {
         let idx: u32 = idx.into();
         self.values.insert(idx.into(), val);
@@ -44,6 +46,7 @@ impl<V> IndexMap<V> {
 }
 
 impl<V> Default for IndexMap<V> {
+    #[inline]
     fn default() -> Self {
         Self { values: IntMap::new() }
     }
@@ -51,13 +54,7 @@ impl<V> Default for IndexMap<V> {
 
 impl<A, V> FromIterator<(PoolIndex<A>, V)> for IndexMap<V> {
     fn from_iter<I: IntoIterator<Item = (PoolIndex<A>, V)>>(iter: I) -> Self {
-        let values = iter
-            .into_iter()
-            .map(|(k, v)| {
-                let k: u32 = k.into();
-                (k.into(), v)
-            })
-            .collect();
+        let values = iter.into_iter().map(|(k, v)| (u32::from(k).into(), v)).collect();
         Self { values }
     }
 }
@@ -69,7 +66,7 @@ unsafe impl<V: Collect> Collect for IndexMap<V> {
     }
 
     #[inline]
-    fn trace(&self, cc: CollectionContext) {
+    fn trace(&self, cc: &Collection) {
         for (k, v) in self.values.iter() {
             k.trace(cc);
             v.trace(cc);

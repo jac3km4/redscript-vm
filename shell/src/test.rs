@@ -3,10 +3,8 @@ use std::ffi::OsStr;
 use std::rc::Rc;
 
 use colored::*;
-use redscript::ast::Span;
 use redscript::bundle::{ConstantPool, PoolIndex};
 use redscript::definition::{Function, Visibility};
-use redscript_compiler::error::Error;
 use redscript_compiler::source_map::Files;
 use redscript_compiler::unit::CompilationUnit;
 use redscript_vm::{args, native, VM};
@@ -14,7 +12,7 @@ use walkdir::WalkDir;
 
 use crate::ShellConfig;
 
-pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> Result<(), Error> {
+pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> anyhow::Result<()> {
     let sources = WalkDir::new(&config.source_dir).into_iter();
     let tests = WalkDir::new(&config.test_dir).into_iter();
     let all = sources
@@ -34,7 +32,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     let class_idx = vm
         .metadata()
         .get_class(suite)
-        .ok_or_else(|| Error::CompileError("Test suite not defined".to_owned(), Span::ZERO))?;
+        .ok_or_else(|| anyhow::anyhow!("Test suite not defined"))?;
     let class = vm.metadata().pool().class(class_idx)?;
 
     for fun_idx in &class.functions {
@@ -46,7 +44,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> R
     Ok(())
 }
 
-fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> Result<(), Error> {
+fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> anyhow::Result<()> {
     vm.call_void(fun_idx, args!());
 
     let name = vm.metadata().pool().def_name(fun_idx)?;

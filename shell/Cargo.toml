@@ -1,18 +1,19 @@
 [package]
 name = "redscript-sh"
-version = "0.0.4-dev"
-edition = "2018"
-publish = false
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [dependencies]
-redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "v0.5.2" }
-redscript-compiler = { git = "https://github.com/jac3km4/redscript.git", package = "redscript-compiler", rev = "v0.5.2" }
 redscript-vm = { path = "../vm" }
-rustyline = "9.1"
-colored = "2"
-walkdir = "2.3"
-serde = { version = "1", features = ["derive"] }
-toml = "0.5"
+redscript.workspace = true
+redscript-compiler.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+walkdir.workspace = true
+toml.workspace = true
+rustyline.workspace = true
+colored.workspace = true
 
 [package.metadata.release]
 disable-tag = true

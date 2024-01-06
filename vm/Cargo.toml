@@ -1,18 +1,18 @@
 [package]
 name = "redscript-vm"
-version = "0.0.4-dev"
-edition = "2018"
-publish = false
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-redscript = { git = "https://github.com/jac3km4/redscript.git", package = "redscript", rev = "v0.5.2" }
-gc-arena = "0.2"
-intmap = "0.7"
-casey = "0.3"
-enum-as-inner = "0.4"
-log = "0.4"
-rand = "0.8"
-itertools = "0.10"
+redscript.workspace = true
+log.workspace = true
+rand.workspace = true
+itertools.workspace = true
+enum-as-inner.workspace = true
+intmap.workspace = true
+casey.workspace = true
+gc-arena.workspace = true

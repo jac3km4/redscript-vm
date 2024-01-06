@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use rand::Rng;
 use redscript::bundle::ConstantPool;
 use redscript::definition::{Definition, Type};
@@ -11,7 +9,7 @@ pub fn default_pool() -> ConstantPool {
     let mut pool = ConstantPool::default();
 
     let mut register_prim = |str: &str| {
-        let idx = pool.names.add(Rc::new(str.to_owned()));
+        let idx = pool.names.add(str.into());
         pool.add_definition::<Type>(Definition::type_(idx, Type::Prim));
     };
 
@@ -124,7 +122,7 @@ pub fn register_natives(vm: &mut VM, on_log: impl Fn(String) + 'static) {
     let meta = vm.metadata_mut();
     
     meta.register_native(
-        "Log",
+        "FTLog",
         on_log
     );
 

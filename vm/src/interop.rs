@@ -1,22 +1,18 @@
 use casey::lower;
-use gc_arena::MutationContext;
+use gc_arena::Mutation;
 use redscript::bundle::ConstantPool;
 
 use crate::value::Value;
 use crate::VMRoot;
 
-pub type VMFunction = dyn for<'gc, 'ctx, 'pool> Fn(
-    MutationContext<'gc, 'ctx>,
-    &'ctx VMRoot<'gc>,
-    &'pool ConstantPool,
-) -> Option<Value<'gc>>;
+pub type VMFunction = dyn for<'gc> Fn(&Mutation<'gc>, &VMRoot<'gc>, &ConstantPool) -> Option<Value<'gc>>;
 
 pub struct Ret<A>(pub A);
 
 pub struct RetOut<A, B>(pub A, pub B);
 
 pub trait IntoVM<'gc> {
-    fn into_vm<'ctx>(self, mc: MutationContext<'gc, 'ctx>) -> Value<'gc>;
+    fn into_vm(self, mc: &Mutation<'gc>) -> Value<'gc>;
 }
 
 pub trait FromVM<'gc>: Sized {
@@ -93,7 +89,7 @@ macro_rules! impl_function_out {
                     let $local = st.pop(mc).unwrap();
                     if let Value::Pinned(pinned) = $local {
                         let res = self(FromVM::from_vm($local, pool).unwrap(), $(FromVM::from_vm(lower!($types), pool).unwrap(),)*);
-                        *pinned.write(mc) = res.1.into_vm(mc);
+                        *pinned.borrow_mut(mc) = res.1.into_vm(mc);
                         Some(res.0.into_vm(mc))
                     } else {
                         panic!("Expected a pinned value for out parameter")

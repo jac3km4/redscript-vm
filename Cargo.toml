@@ -5,6 +5,42 @@ members = [
   "vm",
   "shell"
 ]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.4-dev"
+authors = ["jekky"]
+edition = "2021"
+
+[workspace.dependencies]
+log = "0.4"
+rand = "0.8"
+anyhow = "1"
+itertools = "0.12"
+enum-as-inner = "0.6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+walkdir = "2.3"
+intmap = "2"
+casey = "0.4"
+rustyline = "13"
+colored = "2"
+gc-arena = "0.5"
+
+[workspace.dependencies.redscript]
+git = "https://github.com/jac3km4/redscript.git"
+rev = "v0.5.17"
+features = ["arc"]
+
+[workspace.dependencies.redscript-compiler]
+git = "https://github.com/jac3km4/redscript.git"
+rev = "v0.5.17"
+
+[workspace.metadata.release]
+pre-release-commit-message = "chore: release {{version}}"
+tag-prefix = ""
+shared-version = true
+publish = false
 
 [profile.release]
 strip = "symbols"
