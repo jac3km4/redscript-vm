@@ -466,7 +466,7 @@ impl<'pool> VM<'pool> {
                     Ok(())
                 })?;
             }
-            Instr::ToString(_) => {
+            Instr::ToString(_) | Instr::VariantToString => {
                 self.exec(frame)?;
                 let pool = self.metadata.pool();
                 self.unop(|val, mc| Value::Str(Gc::new(mc, val.to_string(pool).into_boxed_str())));
@@ -479,11 +479,20 @@ impl<'pool> VM<'pool> {
                 self.exec(frame)?;
                 self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) })
             }
-            Instr::VariantIsDefined => todo!(),
-            Instr::VariantIsRef => todo!(),
-            Instr::VariantIsArray => todo!(),
+            Instr::VariantIsDefined => {
+                // TODO: actually do something
+                self.exec(frame)?;
+                self.unop(|_, _| Value::Bool(true))
+            }
+            Instr::VariantIsRef => {
+                self.exec(frame)?;
+                self.unop(|val, _| Value::Bool(matches!(val, Value::Obj(_))))
+            }
+            Instr::VariantIsArray => {
+                self.exec(frame)?;
+                self.unop(|val, _| Value::Bool(matches!(val, Value::Array(_))))
+            }
             Instr::VariantTypeName => todo!(),
-            Instr::VariantToString => todo!(),
             Instr::WeakRefToRef => {}
             Instr::RefToWeakRef => {}
             Instr::WeakRefNull => {
