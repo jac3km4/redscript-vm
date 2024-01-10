@@ -67,7 +67,7 @@ fn repl(pool: ConstantPool, config: &ShellConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(command: Command, pool: ConstantPool, config: &ShellConfig) -> anyhow::Result<bool> {
+fn execute(command: Command<'_>, pool: ConstantPool, config: &ShellConfig) -> anyhow::Result<bool> {
     match command {
         Command::RunMain => {
             run_function(pool, "main;", config)?;

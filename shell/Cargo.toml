@@ -15,5 +15,8 @@ toml.workspace = true
 rustyline.workspace = true
 colored.workspace = true
 
+[lints]
+workspace = true
+
 [package.metadata.release]
 disable-tag = true

@@ -44,7 +44,7 @@ pub fn run_suite(mut pool: ConstantPool, suite: &str, config: &ShellConfig) -> a
     Ok(())
 }
 
-fn run_test(vm: &mut VM, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> anyhow::Result<()> {
+fn run_test(vm: &mut VM<'_>, fun_idx: PoolIndex<Function>, errors: Rc<RefCell<Vec<String>>>) -> anyhow::Result<()> {
     vm.call_void(fun_idx, args!())?;
 
     let name = vm.metadata().pool().def_name(fun_idx)?;
@@ -77,7 +77,7 @@ fn pretty_test_name(name: &str) -> String {
     str
 }
 
-fn register_test_natives(vm: &mut VM, errors: Rc<RefCell<Vec<String>>>) {
+fn register_test_natives(vm: &mut VM<'_>, errors: Rc<RefCell<Vec<String>>>) {
     let meta = vm.metadata_mut();
 
     let copy = errors.clone();

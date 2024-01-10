@@ -17,3 +17,6 @@ enum-as-inner.workspace = true
 intmap.workspace = true
 casey.workspace = true
 gc-arena.workspace = true
+
+[lints]
+workspace = true

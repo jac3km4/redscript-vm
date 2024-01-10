@@ -137,33 +137,28 @@ impl<'gc> Value<'gc> {
 
     pub fn has_type(&self, typ: &TypeId) -> bool {
         match (self, typ) {
-            (Value::I8(_), TypeId::I8) => true,
-            (Value::I16(_), TypeId::I16) => true,
-            (Value::I32(_), TypeId::I32) => true,
-            (Value::I64(_), TypeId::I64) => true,
-            (Value::U8(_), TypeId::U8) => true,
-            (Value::U16(_), TypeId::U16) => true,
-            (Value::U32(_), TypeId::U32) => true,
-            (Value::U64(_), TypeId::U64) => true,
-            (Value::F32(_), TypeId::F32) => true,
-            (Value::F64(_), TypeId::F64) => true,
-            (Value::Bool(_), TypeId::Bool) => true,
-            // TODO: check if it's the right enum
-            (Value::EnumVal(_), TypeId::Enum(_)) => true,
-            // TODO: check if it's the right struct
-            (Value::BoxedStruct(_), TypeId::Struct(_)) => true,
-            (Value::PackedStruct(_), TypeId::Struct(_)) => true,
-            (Value::Obj(Obj::Instance(cell)), TypeId::Ref(class)) => cell.borrow().tag.to_pool() == *class,
-            (Value::Obj(Obj::Instance(cell)), TypeId::WRef(class)) => cell.borrow().tag.to_pool() == *class,
-            (Value::Obj(Obj::Null), TypeId::Ref(_)) => true,
-            (Value::Obj(Obj::Null), TypeId::WRef(_)) => true,
-            (Value::Str(_), TypeId::String) => true,
-            (Value::InternStr(StringType::String, _), TypeId::String) => true,
-            (Value::InternStr(StringType::Name, _), TypeId::CName) => true,
-            (Value::InternStr(StringType::TweakDbId, _), TypeId::TweakDbId) => true,
-            (Value::InternStr(StringType::Resource, _), TypeId::ResRef) => true,
-            // TODO: check if the element type matches
-            (Value::Array(_), TypeId::Array(_)) => true,
+            (Value::I8(_), TypeId::I8)
+            | (Value::I16(_), TypeId::I16)
+            | (Value::I32(_), TypeId::I32)
+            | (Value::I64(_), TypeId::I64)
+            | (Value::U8(_), TypeId::U8)
+            | (Value::U16(_), TypeId::U16)
+            | (Value::U32(_), TypeId::U32)
+            | (Value::U64(_), TypeId::U64)
+            | (Value::F32(_), TypeId::F32)
+            | (Value::F64(_), TypeId::F64)
+            | (Value::Bool(_), TypeId::Bool)
+            | (Value::EnumVal(_), TypeId::Enum(_))
+            | (Value::BoxedStruct(_) | Value::PackedStruct(_), TypeId::Struct(_))
+            | (Value::Obj(Obj::Null), TypeId::Ref(_) | TypeId::WRef(_))
+            | (Value::Str(_) | Value::InternStr(StringType::String, _), TypeId::String)
+            | (Value::InternStr(StringType::Name, _), TypeId::CName)
+            | (Value::InternStr(StringType::TweakDbId, _), TypeId::TweakDbId)
+            | (Value::InternStr(StringType::Resource, _), TypeId::ResRef)
+            | (Value::Array(_), TypeId::Array(_)) => true,
+            (Value::Obj(Obj::Instance(cell)), TypeId::Ref(class) | TypeId::WRef(class)) => {
+                cell.borrow().tag.to_pool() == *class
+            }
             (Value::Pinned(val), _) => val.borrow().has_type(typ),
             _ => false,
         }

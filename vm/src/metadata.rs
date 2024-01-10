@@ -65,12 +65,12 @@ impl<'pool> Metadata<'pool> {
 
     #[inline]
     pub fn get_class(&self, name: &str) -> Option<PoolIndex<Class>> {
-        self.symbols.classes.get(name).cloned()
+        self.symbols.classes.get(name).copied()
     }
 
     #[inline]
     pub fn get_function(&self, name: &str) -> Option<PoolIndex<Function>> {
-        self.symbols.functions.get(name).cloned()
+        self.symbols.functions.get(name).copied()
     }
 
     #[inline]
@@ -79,7 +79,7 @@ impl<'pool> Metadata<'pool> {
     }
 
     #[inline]
-    pub fn get_code_offsets(&mut self, idx: PoolIndex<Function>) -> Option<Rc<Vec<u16>>> {
+    pub fn get_code_offsets(&mut self, idx: PoolIndex<Function>) -> Option<Rc<[u16]>> {
         let meta = self.function_meta.get_mut(idx)?;
         let fun = self.pool.function(idx).ok()?;
         Some(meta.get_offsets(fun))
@@ -110,9 +110,8 @@ impl<'pool> Metadata<'pool> {
                 break true;
             } else if class.base.is_undefined() {
                 break false;
-            } else {
-                expected = class.base;
-            }
+            };
+            expected = class.base;
         }
     }
 }
@@ -190,27 +189,19 @@ impl ClassMetadata {
 
 #[derive(Default)]
 struct FunctionMetadata {
-    offsets: Option<Rc<Vec<u16>>>,
+    offsets: Option<Rc<[u16]>>,
     native: Option<Box<VMFunction>>,
 }
 
 impl FunctionMetadata {
-    fn get_offsets(&mut self, function: &Function) -> Rc<Vec<u16>> {
+    fn get_offsets(&mut self, function: &Function) -> Rc<[u16]> {
         match &self.offsets {
             Some(offsets) => offsets.clone(),
             None => {
-                let code = &function.code.0;
-                let mut offsets = Vec::with_capacity(code.len());
-                let mut current = 0;
-                offsets.push(current);
-
-                for i in &code[..code.len() - 1] {
-                    current += i.size();
-                    offsets.push(current);
-                }
-                let rc = Rc::new(offsets);
-                self.offsets = Some(rc.clone());
-                rc
+                let code = &function.code;
+                let offsets: Rc<[u16]> = code.iter().map(|(loc, _)| loc.value).collect();
+                self.offsets = Some(offsets.clone());
+                offsets
             }
         }
     }
@@ -246,7 +237,7 @@ pub enum TypeId {
 }
 
 impl TypeId {
-    pub fn default_value<'gc>(&self, mc: &Mutation<'gc>, meta: &Metadata) -> Value<'gc> {
+    pub fn default_value<'gc>(&self, mc: &Mutation<'gc>, meta: &Metadata<'_>) -> Value<'gc> {
         match self {
             TypeId::I64 => Value::I64(0),
             TypeId::I32 => Value::I32(0),
@@ -280,7 +271,7 @@ impl TypeId {
                 });
                 Value::BoxedStruct(Gc::new(mc, RefLock::new(fields.zip(values).collect())))
             }
-            TypeId::Array(_) => Value::Array(Gc::new(mc, Default::default())),
+            TypeId::Array(_) => Value::Array(Gc::new(mc, RefLock::default())),
             TypeId::StaticArray(_, _) => todo!(),
         }
     }

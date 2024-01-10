@@ -118,7 +118,7 @@ macro_rules! impl_cast {
 }
 
 #[rustfmt::skip]
-pub fn register_natives(vm: &mut VM, on_log: impl Fn(String) + 'static) {
+pub fn register_natives(vm: &mut VM<'_>, on_log: impl Fn(String) + 'static) {
     let meta = vm.metadata_mut();
     
     meta.register_native(

@@ -32,9 +32,9 @@ impl<'pool> VM<'pool> {
     pub fn new(pool: &'pool ConstantPool) -> Self {
         let metadata = Metadata::new(pool);
         let arena = Arena::new(|mc| VMRoot {
-            frames: GcRefLock::new(mc, Default::default()),
-            stack: GcRefLock::new(mc, Default::default()),
-            contexts: GcRefLock::new(mc, Default::default()),
+            frames: GcRefLock::new(mc, RefLock::default()),
+            stack: GcRefLock::new(mc, RefLock::default()),
+            contexts: GcRefLock::new(mc, RefLock::default()),
         });
         Self { arena, metadata }
     }
@@ -52,7 +52,7 @@ impl<'pool> VM<'pool> {
     where
         for<'gc> F: FnOnce(&Mutation<'gc>) -> Value<'gc>,
     {
-        self.arena.mutate(|mc, root| root.push(f(mc), mc))
+        self.arena.mutate(|mc, root| root.push(f(mc), mc));
     }
 
     #[inline]
@@ -65,7 +65,7 @@ impl<'pool> VM<'pool> {
 
     #[inline]
     fn copy(&mut self, idx: usize) {
-        self.arena.mutate(|mc, root| root.copy(idx, mc))
+        self.arena.mutate(|mc, root| root.copy(idx, mc));
     }
 
     #[inline]
@@ -73,7 +73,7 @@ impl<'pool> VM<'pool> {
     where
         for<'gc> F: FnOnce(Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
-        self.arena.mutate(|mc, root| root.unop(f, mc))
+        self.arena.mutate(|mc, root| root.unop(f, mc));
     }
 
     #[inline]
@@ -81,15 +81,15 @@ impl<'pool> VM<'pool> {
     where
         for<'gc> F: FnOnce(Value<'gc>, Value<'gc>, &Mutation<'gc>) -> Value<'gc>,
     {
-        self.arena.mutate(|mc, root| root.binop(f, mc))
+        self.arena.mutate(|mc, root| root.binop(f, mc));
     }
 
     #[inline]
     fn adjust_stack(&mut self, size: usize) {
-        self.arena.mutate(|mc, root| root.adjust_stack(size, mc))
+        self.arena.mutate(|mc, root| root.adjust_stack(size, mc));
     }
 
-    fn run(&mut self, frame: &mut Frame) -> Result<bool, RuntimeError> {
+    fn run(&mut self, frame: &mut Frame<'_>) -> Result<bool, RuntimeError> {
         loop {
             match self.exec(frame)? {
                 Action::Continue => {}
@@ -100,11 +100,11 @@ impl<'pool> VM<'pool> {
     }
 
     #[inline]
-    fn exec(&mut self, frame: &mut Frame) -> RuntimeResult<Action> {
+    fn exec(&mut self, frame: &mut Frame<'_>) -> RuntimeResult<Action> {
         self.exec_with(frame, false)
     }
 
-    fn exec_with(&mut self, frame: &mut Frame, pin: bool) -> RuntimeResult<Action> {
+    fn exec_with(&mut self, frame: &mut Frame<'_>, pin: bool) -> RuntimeResult<Action> {
         let location = frame.location();
         let instr = match frame.next_instr() {
             Some(i) => i,
@@ -281,7 +281,7 @@ impl<'pool> VM<'pool> {
                     let range = (stack.len() - args as usize)..;
                     let args = stack.drain(range);
                     let data = fields.copied().zip(args).collect();
-                    stack.push(Value::BoxedStruct(Gc::new(mc, RefLock::new(data))))
+                    stack.push(Value::BoxedStruct(Gc::new(mc, RefLock::new(data))));
                 });
             }
             Instr::InvokeStatic(_, _, idx, _) => {
@@ -302,9 +302,8 @@ impl<'pool> VM<'pool> {
                 if !matches!(frame.current_instr(), Some(Instr::Nop)) {
                     self.exec(frame)?;
                     return Ok(Action::Return);
-                } else {
-                    return Ok(Action::Exit);
-                }
+                };
+                return Ok(Action::Exit);
             }
             Instr::Context(_) => {
                 self.exec(frame)?;
@@ -425,22 +424,22 @@ impl<'pool> VM<'pool> {
                 self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
-                })
+                });
             }
             Instr::WeakRefToBool => {
                 self.exec(frame)?;
                 self.unop(|val, _| match val {
                     Value::Obj(Obj::Null) => Value::Bool(false),
                     _ => Value::Bool(true),
-                })
+                });
             }
             Instr::EnumToI32(_, _) => {
                 self.exec(frame)?;
-                self.unop(|val, _| Value::I32(*val.unpinned().as_enum_val().unwrap() as i32))
+                self.unop(|val, _| Value::I32(*val.unpinned().as_enum_val().unwrap() as i32));
             }
             Instr::I32ToEnum(_, _) => {
                 self.exec(frame)?;
-                self.unop(|val, _| Value::EnumVal((*val.unpinned().as_i32().unwrap()).into()))
+                self.unop(|val, _| Value::EnumVal((*val.unpinned().as_i32().unwrap()).into()));
             }
             Instr::DynamicCast(expected, _) => {
                 self.exec(frame)?;
@@ -477,24 +476,23 @@ impl<'pool> VM<'pool> {
             Instr::FromVariant(typ) => {
                 let typ = self.metadata.get_type(typ).unwrap().clone();
                 self.exec(frame)?;
-                self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) })
+                self.unop(|val, _| if val.has_type(&typ) { val } else { Value::Obj(Obj::Null) });
             }
             Instr::VariantIsDefined => {
                 // TODO: actually do something
                 self.exec(frame)?;
-                self.unop(|_, _| Value::Bool(true))
+                self.unop(|_, _| Value::Bool(true));
             }
             Instr::VariantIsRef => {
                 self.exec(frame)?;
-                self.unop(|val, _| Value::Bool(matches!(val, Value::Obj(_))))
+                self.unop(|val, _| Value::Bool(matches!(val, Value::Obj(_))));
             }
             Instr::VariantIsArray => {
                 self.exec(frame)?;
-                self.unop(|val, _| Value::Bool(matches!(val, Value::Array(_))))
+                self.unop(|val, _| Value::Bool(matches!(val, Value::Array(_))));
             }
             Instr::VariantTypeName => todo!(),
-            Instr::WeakRefToRef => {}
-            Instr::RefToWeakRef => {}
+            Instr::WeakRefToRef | Instr::RefToWeakRef => {}
             Instr::WeakRefNull => {
                 self.push(|_| Value::Obj(Obj::Null));
             }
@@ -548,7 +546,7 @@ impl<'pool> VM<'pool> {
         self.call_with_params(idx, &function.parameters)
     }
 
-    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame) -> RuntimeResult<()> {
+    fn call_static(&mut self, idx: PoolIndex<Function>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
         let function = self.metadata.pool().function(idx).unwrap();
         let mut indexes = Vec::with_capacity(function.parameters.len());
 
@@ -614,7 +612,7 @@ impl<'pool> VM<'pool> {
         Ok(())
     }
 
-    fn exit(&mut self, frame: &Frame, returns: bool) {
+    fn exit(&mut self, frame: &Frame<'_>, returns: bool) {
         self.arena.mutate(|mc, root| {
             let mut stack = root.stack.borrow_mut(mc);
             if returns {
@@ -635,7 +633,7 @@ impl<'pool> VM<'pool> {
         }
     }
 
-    fn assignment(&mut self, frame: &mut Frame) -> RuntimeResult<()> {
+    fn assignment(&mut self, frame: &mut Frame<'_>) -> RuntimeResult<()> {
         match frame.next_instr().unwrap() {
             Instr::Local(idx) => {
                 self.exec(frame)?;
@@ -737,7 +735,7 @@ impl<'pool> VM<'pool> {
         self.arena.mutate(|mc, root| {
             let mut local = root.frames.borrow_mut(mc);
             let local = local.last_mut().unwrap().get_mut(idx).unwrap();
-            f(local, mc, root)
+            f(local, mc, root);
         });
     }
 }
@@ -745,13 +743,13 @@ impl<'pool> VM<'pool> {
 #[derive(Debug)]
 pub struct Frame<'pool> {
     function: &'pool Function,
-    offsets: Rc<Vec<u16>>,
+    offsets: Rc<[u16]>,
     ip: usize,
     sp: usize,
 }
 
 impl<'pool> Frame<'pool> {
-    fn new(function: &'pool Function, offsets: Rc<Vec<u16>>, sp: usize) -> Self {
+    fn new(function: &'pool Function, offsets: Rc<[u16]>, sp: usize) -> Self {
         Self {
             function,
             offsets,
@@ -778,7 +776,7 @@ impl<'pool> Frame<'pool> {
 
     #[inline]
     fn current_instr(&self) -> Option<Instr<Offset>> {
-        self.function.code.0.get(self.ip).cloned()
+        self.function.code.as_ref().get(self.ip).cloned()
     }
 
     #[inline]
@@ -828,7 +826,7 @@ impl<'gc> VMRoot<'gc> {
     {
         let mut stack = self.stack.borrow_mut(mc);
         let val = stack.pop().unwrap();
-        stack.push(fun(val, mc))
+        stack.push(fun(val, mc));
     }
 
     #[inline]
@@ -839,7 +837,7 @@ impl<'gc> VMRoot<'gc> {
         let mut stack = self.stack.borrow_mut(mc);
         let rhs = stack.pop().unwrap();
         let lhs = stack.pop().unwrap();
-        stack.push(fun(lhs, rhs, mc))
+        stack.push(fun(lhs, rhs, mc));
     }
 
     #[inline]

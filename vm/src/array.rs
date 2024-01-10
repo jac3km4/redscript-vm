@@ -1,19 +1,19 @@
 use crate::error::RuntimeResult;
 use crate::*;
 
-pub fn clear(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn clear(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.pop(|val, mc| val.unpinned().as_array().unwrap().borrow_mut(mc).clear());
     Ok(())
 }
 
-pub fn size(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn size(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.unop(|val, _| Value::I32(val.unpinned().as_array().unwrap().borrow().len() as i32));
     Ok(())
 }
 
-pub fn resize(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn resize(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.arena.mutate(|mc, root| {
@@ -33,7 +33,7 @@ pub fn resize(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn find_first(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn find_first(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, needle, _| {
@@ -48,7 +48,7 @@ pub fn find_first(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn find_last(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn find_last(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, needle, _| {
@@ -63,7 +63,7 @@ pub fn find_last(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn contains(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn contains(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, needle, _| {
@@ -75,7 +75,7 @@ pub fn contains(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn count(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn count(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, needle, _| {
@@ -87,7 +87,7 @@ pub fn count(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn push(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn push(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.arena.mutate(|mc, root| {
@@ -100,7 +100,7 @@ pub fn push(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn pop(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn pop(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.unop(|array, mc| {
         let binding = array.unpinned();
@@ -110,7 +110,7 @@ pub fn pop(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn insert(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn insert(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.exec(frame)?;
@@ -127,7 +127,7 @@ pub fn insert(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn remove(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn remove(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, needle, mc| {
@@ -144,7 +144,7 @@ pub fn remove(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn erase(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn erase(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, index, mc| {
@@ -163,7 +163,7 @@ pub fn erase(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn last(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn last(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.unop(|array, _| {
         let array = array.unpinned();
@@ -173,7 +173,7 @@ pub fn last(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
     Ok(())
 }
 
-pub fn element(vm: &mut VM, frame: &mut Frame) -> RuntimeResult<()> {
+pub fn element(vm: &mut VM<'_>, frame: &mut Frame<'_>) -> RuntimeResult<()> {
     vm.exec(frame)?;
     vm.exec(frame)?;
     vm.binop(|array, index, _| {
